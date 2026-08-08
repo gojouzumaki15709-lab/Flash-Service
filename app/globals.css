@@ -1,0 +1,131 @@
+@import url("https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Manrope:wght@400;500;600;700&display=swap");
+
+:root {
+  --ink: #0f2e29;
+  --paper: #fbf6ec;
+  --mango: #ff8a3d;
+  --mango-dark: #e56b1f;
+  --teal: #0f6e5f;
+  --teal-deep: #0a4b40;
+  --lemon: #ffd23f;
+  --line: rgba(15, 46, 41, 0.14);
+  --radius: 18px;
+  --font-display: "Baloo 2", system-ui, sans-serif;
+  --font-body: "Manrope", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+.display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 13px 22px;
+  border-radius: 999px;
+  border: none;
+  font-weight: 700;
+  font-size: 15px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn-primary {
+  background: var(--teal);
+  color: var(--paper);
+  box-shadow: 0 6px 0 var(--teal-deep);
+}
+
+.btn-primary:hover {
+  box-shadow: 0 4px 0 var(--teal-deep);
+  transform: translateY(2px);
+}
+
+.btn-accent {
+  background: var(--mango);
+  color: var(--ink);
+  box-shadow: 0 6px 0 var(--mango-dark);
+}
+
+.btn-accent:hover {
+  box-shadow: 0 4px 0 var(--mango-dark);
+  transform: translateY(2px);
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+input,
+select {
+  font-family: var(--font-body);
+  font-size: 15px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  width: 100%;
+}
+
+input:focus,
+select:focus,
+button:focus-visible {
+  outline: 3px solid var(--lemon);
+  outline-offset: 1px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--teal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

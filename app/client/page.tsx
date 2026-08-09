@@ -8,7 +8,7 @@ type StockItem = { id: string; quantity: number; product: { id: string; name: st
 type PaymentMethod = { id: string; type: string; label: string; is_active: boolean };
 type Debt = { id: string; amount: number; created_at: string; order: { vendor: { name: string } } | null };
 
-type OrderHistoryItem = { quantity: number; unit_price: number; product: { name: string } };
+type OrderHistoryItem = { quantity: number; quantity_taken: number | null; unit_price: number; product: { name: string } };
 type OrderHistory = {
   id: string;
   total: number;
@@ -21,15 +21,16 @@ type OrderHistory = {
   items: OrderHistoryItem[];
 };
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  confirmed: { label: "Confirmée", color: "var(--teal)" },
-  pending: { label: "En attente", color: "#a15c0a" },
-  cancelled: { label: "Annulée", color: "#c0392b" },
+const STATUS_LABELS: Record<string, { label: string; badgeClass: string }> = {
+  confirmed: { label: "Confirmée", badgeClass: "badge-success" },
+  pending: { label: "En attente", badgeClass: "badge-warning" },
+  cancelled: { label: "Annulée", badgeClass: "badge-danger" },
 };
 
 export default function ClientPage() {
   const router = useRouter();
   const [view, setView] = useState<"vendors" | "history">("vendors");
+  const [waveReturnMessage, setWaveReturnMessage] = useState("");
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [stock, setStock] = useState<StockItem[]>([]);
@@ -63,6 +64,22 @@ export default function ClientPage() {
     fetch("/api/vendors").then((r) => r.json()).then((d) => setVendors(d.vendors || []));
     fetch("/api/admin/payment-methods").then((r) => r.json()).then((d) => setPaymentMethods((d.paymentMethods || []).filter((p: PaymentMethod) => p.is_active)));
     loadDebts();
+
+    // Retour depuis Wave après paiement (succès ou erreur). Le statut réel de
+    // la commande est confirmé côté serveur par le webhook Wave, pas par ce
+    // paramètre d'URL — ici on ne fait qu'informer visuellement le client.
+    const params = new URLSearchParams(window.location.search);
+    const waveStatus = params.get("wave");
+    if (waveStatus === "success") {
+      setWaveReturnMessage("Paiement Wave reçu ! La commande sera confirmée dans quelques instants.");
+      setHistoryLoaded(false);
+      setView("history");
+    } else if (waveStatus === "error") {
+      setWaveReturnMessage("Le paiement Wave n'a pas abouti. Tu peux réessayer depuis le vendeur.");
+    }
+    if (waveStatus) {
+      window.history.replaceState({}, "", "/client");
+    }
   }, []);
 
   useEffect(() => {
@@ -112,6 +129,15 @@ export default function ClientPage() {
       setMessage(data.error);
       return;
     }
+
+    // Paiement Wave : on redirige tout de suite vers wave_launch_url.
+    // Important : c'est une redirection de navigateur classique, jamais une
+    // ouverture dans une iframe/webview, sinon l'app Wave ne peut pas s'ouvrir.
+    if (data.waveLaunchUrl) {
+      window.location.href = data.waveLaunchUrl;
+      return;
+    }
+
     setMessage("Commande passée avec succès !");
     setCart({});
     openVendor(selectedVendor!);
@@ -132,6 +158,12 @@ export default function ClientPage() {
           Déconnexion
         </button>
       </div>
+
+      {waveReturnMessage && (
+        <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--teal)" }}>
+          {waveReturnMessage}
+        </div>
+      )}
 
       {!selectedVendor ? (
         <>
@@ -170,17 +202,20 @@ export default function ClientPage() {
               </div>
               <div style={{ display: "grid", gap: 10 }}>
                 {orderHistory.map((o) => {
-                  const statusInfo = STATUS_LABELS[o.status] || { label: o.status, color: "#888" };
+                  const statusInfo = STATUS_LABELS[o.status] || { label: o.status, badgeClass: "badge-neutral" };
                   return (
                     <div key={o.id} className="card">
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                         <strong>{o.vendor?.name || "Vendeur"}</strong>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: statusInfo.color }}>{statusInfo.label}</span>
+                        <span className={`badge ${statusInfo.badgeClass}`}>{statusInfo.label}</span>
                       </div>
                       <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 6 }}>
                         {o.items.map((it, i) => (
                           <div key={i}>
                             {it.quantity} × {it.product.name} ({it.unit_price} FCFA/u)
+                            {it.quantity_taken != null && it.quantity_taken !== it.quantity && (
+                              <span style={{ color: "#a15c0a" }}> — {it.quantity_taken} remis(e)</span>
+                            )}
                           </div>
                         ))}
                       </div>

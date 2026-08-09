@@ -5,9 +5,22 @@ import { useRouter } from "next/navigation";
 
 type Tab = "vendors" | "products" | "payments" | "alerts" | "clients";
 
+const TAB_DEFS: [Tab, string][] = [
+  ["vendors", "Vendeurs"],
+  ["products", "Produits"],
+  ["payments", "Paiements"],
+  ["alerts", "Alertes stock"],
+  ["clients", "Clients fréquents"],
+];
+
 export default function AdminPage() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("vendors");
+  const [counts, setCounts] = useState<Partial<Record<Tab, number>>>({});
+
+  function reportCount(id: Tab, count: number) {
+    setCounts((c) => (c[id] === count ? c : { ...c, [id]: count }));
+  }
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -24,47 +37,65 @@ export default function AdminPage() {
       </div>
 
       <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
-        {([
-          ["vendors", "Vendeurs"],
-          ["products", "Produits"],
-          ["payments", "Paiements"],
-          ["alerts", "Alertes stock"],
-          ["clients", "Clients fréquents"],
-        ] as [Tab, string][]).map(([id, label]) => (
-          <button
-            key={id}
-            className="btn"
-            style={{
-              fontSize: 12,
-              padding: "8px 14px",
-              background: tab === id ? "var(--teal)" : "#f1ede2",
-              color: tab === id ? "#fff" : "var(--ink)",
-              boxShadow: "none",
-            }}
-            onClick={() => setTab(id)}
-          >
-            {label}
-          </button>
-        ))}
+        {TAB_DEFS.map(([id, label]) => {
+          const count = counts[id];
+          const isAlerts = id === "alerts" && !!count;
+          return (
+            <button
+              key={id}
+              className="btn"
+              style={{
+                fontSize: 12,
+                padding: "8px 14px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                background: tab === id ? "var(--teal)" : "#f1ede2",
+                color: tab === id ? "#fff" : "var(--ink)",
+                boxShadow: "none",
+              }}
+              onClick={() => setTab(id)}
+            >
+              {label}
+              {!!count && (
+                <span
+                  className={`badge ${isAlerts ? "badge-danger" : "badge-neutral"}`}
+                  style={{
+                    padding: "1px 8px",
+                    fontSize: 11,
+                    background: tab === id ? "rgba(255,255,255,0.25)" : undefined,
+                    color: tab === id ? "#fff" : undefined,
+                  }}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {tab === "vendors" && <VendorsTab />}
-      {tab === "products" && <ProductsTab />}
-      {tab === "payments" && <PaymentsTab />}
-      {tab === "alerts" && <AlertsTab />}
-      {tab === "clients" && <ClientsTab />}
+      {tab === "vendors" && <VendorsTab onCount={(n) => reportCount("vendors", n)} />}
+      {tab === "products" && <ProductsTab onCount={(n) => reportCount("products", n)} />}
+      {tab === "payments" && <PaymentsTab onCount={(n) => reportCount("payments", n)} />}
+      {tab === "alerts" && <AlertsTab onCount={(n) => reportCount("alerts", n)} />}
+      {tab === "clients" && <ClientsTab onCount={(n) => reportCount("clients", n)} />}
     </main>
   );
 }
 
-function VendorsTab() {
+function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
   const [vendors, setVendors] = useState<any[]>([]);
   const [buildings, setBuildings] = useState<any[]>([]);
   const [form, setForm] = useState({ code: "", name: "", password: "", buildingId: "" });
   const [error, setError] = useState("");
 
   function load() {
-    fetch("/api/admin/vendors").then((r) => r.json()).then((d) => setVendors(d.vendors || []));
+    fetch("/api/admin/vendors").then((r) => r.json()).then((d) => {
+      const list = d.vendors || [];
+      setVendors(list);
+      onCount(list.length);
+    });
     fetch("/api/admin/buildings").then((r) => r.json()).then((d) => setBuildings(d.buildings || []));
   }
   useEffect(load, []);
@@ -124,12 +155,16 @@ function VendorsTab() {
   );
 }
 
-function ProductsTab() {
+function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
   const [products, setProducts] = useState<any[]>([]);
   const [form, setForm] = useState({ name: "", price: "", imageUrl: "", lowStockThreshold: "2" });
 
   function load() {
-    fetch("/api/admin/products").then((r) => r.json()).then((d) => setProducts(d.products || []));
+    fetch("/api/admin/products").then((r) => r.json()).then((d) => {
+      const list = d.products || [];
+      setProducts(list);
+      onCount(list.length);
+    });
   }
   useEffect(load, []);
 
@@ -172,12 +207,16 @@ function ProductsTab() {
   );
 }
 
-function PaymentsTab() {
+function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
   const [methods, setMethods] = useState<any[]>([]);
-  const [form, setForm] = useState({ type: "cash", label: "", merchantLink: "", apiKey: "" });
+  const [form, setForm] = useState({ type: "cash", label: "", merchantLink: "", apiKey: "", webhookSecret: "" });
 
   function load() {
-    fetch("/api/admin/payment-methods").then((r) => r.json()).then((d) => setMethods(d.paymentMethods || []));
+    fetch("/api/admin/payment-methods").then((r) => r.json()).then((d) => {
+      const list = d.paymentMethods || [];
+      setMethods(list);
+      onCount(list.filter((m: any) => m.is_active).length);
+    });
   }
   useEffect(load, []);
 
@@ -188,7 +227,7 @@ function PaymentsTab() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
-    setForm({ type: "cash", label: "", merchantLink: "", apiKey: "" });
+    setForm({ type: "cash", label: "", merchantLink: "", apiKey: "", webhookSecret: "" });
     load();
   }
 
@@ -218,7 +257,28 @@ function PaymentsTab() {
         </select>
         <input placeholder="Nom affiché (ex: Wave)" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} required />
         <input placeholder="Lien marchand (optionnel)" value={form.merchantLink} onChange={(e) => setForm({ ...form, merchantLink: e.target.value })} />
-        <input placeholder="Clé API (optionnel, gardée secrète)" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} />
+        {form.type === "wave" ? (
+          <>
+            <input
+              placeholder="Clé API Wave (wave_sn_prod_...)"
+              value={form.apiKey}
+              onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+            />
+            <input
+              placeholder="Clé de signature webhook (wave_sn_WHS_...)"
+              value={form.webhookSecret}
+              onChange={(e) => setForm({ ...form, webhookSecret: e.target.value })}
+            />
+            <p style={{ fontSize: 12, opacity: 0.65 }}>
+              Enregistre l'URL webhook suivante dans le Business Portal Wave (Développeurs → Webhooks),
+              évènement <code>checkout.session.completed</code> (+ <code>payment_failed</code> conseillé) :
+              <br />
+              <code>{typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/wave</code>
+            </p>
+          </>
+        ) : (
+          <input placeholder="Clé API (optionnel, gardée secrète)" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} />
+        )}
         <button className="btn btn-primary" type="submit">Ajouter</button>
       </form>
 
@@ -244,10 +304,14 @@ function PaymentsTab() {
   );
 }
 
-function AlertsTab() {
+function AlertsTab({ onCount }: { onCount: (n: number) => void }) {
   const [lowStock, setLowStock] = useState<any[]>([]);
   useEffect(() => {
-    fetch("/api/admin/low-stock").then((r) => r.json()).then((d) => setLowStock(d.lowStock || []));
+    fetch("/api/admin/low-stock").then((r) => r.json()).then((d) => {
+      const list = d.lowStock || [];
+      setLowStock(list);
+      onCount(list.length);
+    });
   }, []);
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -261,10 +325,14 @@ function AlertsTab() {
   );
 }
 
-function ClientsTab() {
+function ClientsTab({ onCount }: { onCount: (n: number) => void }) {
   const [clients, setClients] = useState<any[]>([]);
   useEffect(() => {
-    fetch("/api/admin/frequent-clients").then((r) => r.json()).then((d) => setClients(d.clients || []));
+    fetch("/api/admin/frequent-clients").then((r) => r.json()).then((d) => {
+      const list = d.clients || [];
+      setClients(list);
+      onCount(list.length);
+    });
   }, []);
   return (
     <div style={{ display: "grid", gap: 10 }}>

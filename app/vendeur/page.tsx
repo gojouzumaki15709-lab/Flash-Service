@@ -215,28 +215,21 @@ export default function VendorPage() {
 
       <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
-          <strong>Statut de la boutique</strong>
-          <div style={{ fontSize: 13, opacity: 0.7 }}>Les clients ne voient ton stock que si tu es ouvert.</div>
+          <strong>Statut de la boutique</strong>{" "}
+          <span className={`badge ${isOpen ? "badge-success" : "badge-neutral"}`} style={{ marginLeft: 6 }}>
+            {isOpen ? "Ouvert" : "Fermé"}
+          </span>
+          <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4 }}>Les clients ne voient ton stock que si tu es ouvert.</div>
         </div>
         <button className={isOpen ? "btn btn-primary" : "btn btn-accent"} onClick={toggleOpen}>
-          {isOpen ? "Ouvert — fermer" : "Fermé — ouvrir"}
+          {isOpen ? "Fermer" : "Ouvrir"}
         </button>
       </div>
 
       <h2 style={{ fontSize: 16, marginBottom: 10 }}>
         Commandes en attente (paiement liquide)
         {!!pendingOrders.length && (
-          <span
-            style={{
-              marginLeft: 8,
-              fontSize: 12,
-              fontWeight: 700,
-              padding: "2px 8px",
-              borderRadius: 999,
-              background: "#fbe6c8",
-              color: "#a15c0a",
-            }}
-          >
+          <span className="badge badge-warning" style={{ marginLeft: 8 }}>
             {pendingOrders.length}
           </span>
         )}

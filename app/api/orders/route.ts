@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { getSession } from "@/lib/auth";
+import { createWaveCheckoutSession } from "@/lib/wave";
 
 const DEBT_LIMIT = 1000;
+
+function siteUrl(req: NextRequest) {
+  // En prod sur Vercel, NEXT_PUBLIC_SITE_URL doit être défini (ex: https://flash-service.vercel.app).
+  // En dev local, on retombe sur l'origine de la requête.
+  return process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin;
+}
 
 // body: { vendorId, items: [{ productId, quantity }], paymentMethodId, isDebt }
 export async function POST(req: NextRequest) {
@@ -48,12 +55,37 @@ export async function POST(req: NextRequest) {
     orderItems.push({ product_id: item.productId, quantity: item.quantity, unit_price: product.price });
   }
 
-  // 3. Déterminer si le paiement est en liquide (dans ce cas, la commande
-  //    reste "pending" tant que le vendeur n'a pas confirmé quantité + somme reçue)
-  let isCash = false;
+  // 3. Déterminer le type de paiement.
+  //    - cash : commande "pending" tant que le vendeur n'a pas confirmé quantité + somme reçue.
+  //    - wave : commande "pending" tant que Wave n'a pas confirmé le paiement via webhook.
+  //    - autre / dette : "confirmed" immédiatement.
+  let paymentType: string | null = null;
+  let wavePaymentMethod: { id: string; api_key_encrypted: string | null; is_active: boolean } | null = null;
   if (paymentMethodId) {
-    const { data: pm } = await db.from("payment_methods").select("type").eq("id", paymentMethodId).single();
-    isCash = pm?.type === "cash";
+    const { data: pm } = await db
+      .from("payment_methods")
+      .select("id, type, api_key_encrypted, is_active")
+      .eq("id", paymentMethodId)
+      .single();
+    const pmData = pm as { id: string; type: string; api_key_encrypted: string | null; is_active: boolean } | null;
+    paymentType = pmData?.type || null;
+    if (paymentType === "wave" && pmData) {
+      wavePaymentMethod = { id: pmData.id, api_key_encrypted: pmData.api_key_encrypted, is_active: pmData.is_active };
+    }
+  }
+  const isCash = paymentType === "cash";
+  const isWave = paymentType === "wave";
+
+  if (isWave) {
+    if (!wavePaymentMethod?.is_active) {
+      return NextResponse.json({ error: "Le paiement Wave n'est pas disponible actuellement." }, { status: 400 });
+    }
+    if (!wavePaymentMethod.api_key_encrypted) {
+      return NextResponse.json(
+        { error: "Le paiement Wave n'est pas encore configuré (clé API manquante). Contacte l'admin." },
+        { status: 400 }
+      );
+    }
   }
 
   // 4. Si paiement à crédit : vérifier le plafond de dette (1000, tous vendeurs confondus)
@@ -76,7 +108,8 @@ export async function POST(req: NextRequest) {
 
   // 5. Créer la commande
   //    - paiement liquide -> "pending" : le vendeur doit confirmer quantité prise + somme reçue
-  //    - wave / dette -> "confirmed" immédiatement (paiement déjà effectif)
+  //    - wave -> "pending" : confirmée seulement quand Wave notifie le paiement via webhook
+  //    - dette / autre -> "confirmed" immédiatement (paiement déjà effectif)
   const { data: order, error: orderError } = await db
     .from("orders")
     .insert({
@@ -85,7 +118,7 @@ export async function POST(req: NextRequest) {
       payment_method_id: paymentMethodId || null,
       is_debt: !!isDebt,
       total,
-      status: isCash ? "pending" : "confirmed",
+      status: isCash || isWave ? "pending" : "confirmed",
     })
     .select()
     .single();
@@ -111,6 +144,43 @@ export async function POST(req: NextRequest) {
   // 7. Si dette, enregistrer
   if (isDebt) {
     await db.from("debts").insert({ client_id: session.id, order_id: order.id, amount: total });
+  }
+
+  // 8. Si Wave : créer la session de paiement et renvoyer le lien de redirection.
+  //    Si Wave échoue, on annule proprement la commande et on restitue le stock
+  //    (le client n'a encore rien payé à ce stade).
+  if (isWave && wavePaymentMethod) {
+    const base = siteUrl(req);
+    try {
+      const waveSession = await createWaveCheckoutSession({
+        apiKey: wavePaymentMethod.api_key_encrypted!,
+        amount: total,
+        clientReference: order.id,
+        successUrl: `${base}/client?wave=success&order=${order.id}`,
+        errorUrl: `${base}/client?wave=error&order=${order.id}`,
+      });
+
+      await db.from("orders").update({ wave_checkout_id: waveSession.id }).eq("id", order.id);
+
+      return NextResponse.json({ ok: true, order, waveLaunchUrl: waveSession.wave_launch_url });
+    } catch (err) {
+      // Rollback : on restitue le stock réservé et on annule la commande.
+      for (const item of items) {
+        const row = stockRows?.find((s) => s.product_id === item.productId);
+        if (row) {
+          await db
+            .from("vendor_stock")
+            .update({ quantity: row.quantity, updated_at: new Date().toISOString() })
+            .eq("id", row.id);
+        }
+      }
+      await db.from("orders").update({ status: "cancelled" }).eq("id", order.id);
+      const errorMessage = err instanceof Error ? err.message : "Erreur inconnue.";
+      return NextResponse.json(
+        { error: `Impossible de démarrer le paiement Wave : ${errorMessage}` },
+        { status: 502 }
+      );
+    }
   }
 
   return NextResponse.json({ ok: true, order });

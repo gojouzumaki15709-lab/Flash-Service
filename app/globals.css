@@ -123,6 +123,45 @@ button:focus-visible {
   color: var(--teal);
 }
 
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.badge-success {
+  background: rgba(15, 110, 95, 0.12);
+  color: var(--teal);
+}
+
+.badge-warning {
+  background: rgba(255, 138, 61, 0.15);
+  color: var(--mango-dark);
+}
+
+.badge-danger {
+  background: rgba(192, 57, 43, 0.12);
+  color: #c0392b;
+}
+
+.badge-info {
+  background: rgba(15, 46, 41, 0.08);
+  color: var(--ink);
+  opacity: 0.75;
+}
+
+.badge-neutral {
+  background: #f1ede2;
+  color: var(--ink);
+  opacity: 0.65;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;

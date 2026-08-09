@@ -13,13 +13,13 @@ export async function GET() {
   return NextResponse.json({ paymentMethods: data });
 }
 
-// body: { type, label, merchantLink, apiKey }
+// body: { type, label, merchantLink, apiKey, webhookSecret }
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "Non autorisé." }, { status: 401 });
   }
-  const { type, label, merchantLink, apiKey } = await req.json();
+  const { type, label, merchantLink, apiKey, webhookSecret } = await req.json();
   if (!type || !label) {
     return NextResponse.json({ error: "Champs manquants." }, { status: 400 });
   }
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
       label,
       merchant_link: merchantLink || null,
       api_key_encrypted: apiKey || null, // TODO: chiffrer avant stockage en production
+      config: webhookSecret ? { webhook_secret: webhookSecret } : {},
     })
     .select("id, type, label, is_active, merchant_link")
     .single();

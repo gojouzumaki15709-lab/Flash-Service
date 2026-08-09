@@ -105,6 +105,8 @@ create table orders (
   total numeric(10,2) not null default 0,
   cash_amount_received numeric(10,2),      -- si paiement liquide
   confirmed_by_vendor boolean not null default false,
+  wave_checkout_id text,                   -- id de session Wave (cos-xxx), si paiement Wave
+  wave_transaction_id text,                -- id de transaction Wave une fois payé
   created_at timestamptz not null default now()
 );
 
@@ -115,7 +117,8 @@ create table order_items (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null references orders(id) on delete cascade,
   product_id uuid not null references products(id),
-  quantity int not null,
+  quantity int not null,                -- quantité COMMANDÉE à l'origine (ne change plus après confirmation)
+  quantity_taken int,                   -- quantité réellement remise par le vendeur (peut différer si le client a pris moins)
   unit_price numeric(10,2) not null    -- prix au moment de l'achat
 );
 
@@ -142,12 +145,23 @@ where is_repaid = false
 group by client_id;
 
 -- ------------------------------------------------------------
+-- 11. ÉVÉNEMENTS WEBHOOK WAVE (idempotence : Wave peut renvoyer
+--     le même événement plusieurs fois, on ne le traite qu'une fois)
+-- ------------------------------------------------------------
+create table wave_webhook_events (
+  id text primary key,           -- id d'événement Wave (ex: EV_QvEZuDSQbLdI)
+  type text not null,
+  received_at timestamptz not null default now()
+);
+
+-- ------------------------------------------------------------
 -- Index utiles
 -- ------------------------------------------------------------
 create index idx_vendor_stock_vendor on vendor_stock(vendor_id);
 create index idx_orders_client on orders(client_id);
 create index idx_orders_vendor on orders(vendor_id);
 create index idx_debts_client on debts(client_id);
+create index idx_orders_wave_checkout_id on orders(wave_checkout_id);
 
 -- ------------------------------------------------------------
 -- SÉCURITÉ : activer Row Level Security sur toutes les tables.
@@ -165,6 +179,7 @@ alter table payment_methods enable row level security;
 alter table orders enable row level security;
 alter table order_items enable row level security;
 alter table debts enable row level security;
+alter table wave_webhook_events enable row level security;
 
 -- ------------------------------------------------------------
 -- Pré-remplir les 26 x 16 bâtiments possibles (A1 -> Z16)

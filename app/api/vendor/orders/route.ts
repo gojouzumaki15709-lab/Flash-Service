@@ -107,9 +107,9 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    if (finalQty !== item.quantity) {
-      await db.from("order_items").update({ quantity: finalQty }).eq("id", item.id);
-    }
+    // On garde "quantity" intacte (ce qui a été commandé à l'origine, pour
+    // la traçabilité) et on enregistre séparément ce qui a été réellement remis.
+    await db.from("order_items").update({ quantity_taken: finalQty }).eq("id", item.id);
 
     newTotal += finalQty * item.unit_price;
   }

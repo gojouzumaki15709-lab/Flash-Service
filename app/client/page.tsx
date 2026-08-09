@@ -6,9 +6,30 @@ import { useRouter } from "next/navigation";
 type Vendor = { id: string; name: string; is_open: boolean; building: { letter: string; number: number } };
 type StockItem = { id: string; quantity: number; product: { id: string; name: string; image_url: string | null; price: number } };
 type PaymentMethod = { id: string; type: string; label: string; is_active: boolean };
+type Debt = { id: string; amount: number; created_at: string; order: { vendor: { name: string } } | null };
+
+type OrderHistoryItem = { quantity: number; unit_price: number; product: { name: string } };
+type OrderHistory = {
+  id: string;
+  total: number;
+  status: string;
+  is_debt: boolean;
+  cash_amount_received: number | null;
+  created_at: string;
+  vendor: { name: string } | null;
+  payment_method: { label: string; type: string } | null;
+  items: OrderHistoryItem[];
+};
+
+const STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  confirmed: { label: "Confirmée", color: "var(--teal)" },
+  pending: { label: "En attente", color: "#a15c0a" },
+  cancelled: { label: "Annulée", color: "#c0392b" },
+};
 
 export default function ClientPage() {
   const router = useRouter();
+  const [view, setView] = useState<"vendors" | "history">("vendors");
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [stock, setStock] = useState<StockItem[]>([]);
@@ -17,11 +38,36 @@ export default function ClientPage() {
   const [paymentMethodId, setPaymentMethodId] = useState("");
   const [isDebt, setIsDebt] = useState(false);
   const [message, setMessage] = useState("");
+  const [debtTotal, setDebtTotal] = useState(0);
+  const [debts, setDebts] = useState<Debt[]>([]);
+  const [orderHistory, setOrderHistory] = useState<OrderHistory[]>([]);
+  const [totalSpent, setTotalSpent] = useState(0);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+
+  async function loadDebts() {
+    const res = await fetch("/api/client/debts");
+    const data = await res.json();
+    setDebtTotal(data.total || 0);
+    setDebts(data.debts || []);
+  }
+
+  async function loadHistory() {
+    const res = await fetch("/api/client/orders");
+    const data = await res.json();
+    setOrderHistory(data.orders || []);
+    setTotalSpent(data.totalSpent || 0);
+    setHistoryLoaded(true);
+  }
 
   useEffect(() => {
     fetch("/api/vendors").then((r) => r.json()).then((d) => setVendors(d.vendors || []));
     fetch("/api/admin/payment-methods").then((r) => r.json()).then((d) => setPaymentMethods((d.paymentMethods || []).filter((p: PaymentMethod) => p.is_active)));
+    loadDebts();
   }, []);
+
+  useEffect(() => {
+    if (view === "history" && !historyLoaded) loadHistory();
+  }, [view, historyLoaded]);
 
   async function openVendor(v: Vendor) {
     setSelectedVendor(v);
@@ -69,6 +115,8 @@ export default function ClientPage() {
     setMessage("Commande passée avec succès !");
     setCart({});
     openVendor(selectedVendor!);
+    loadDebts();
+    setHistoryLoaded(false);
   }
 
   async function logout() {
@@ -87,44 +135,129 @@ export default function ClientPage() {
 
       {!selectedVendor ? (
         <>
-          <h2 style={{ fontSize: 18, marginBottom: 12 }}>Vendeurs</h2>
-          <div style={{ display: "grid", gap: 10 }}>
-            {vendors.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => v.is_open && openVendor(v)}
-                className="card"
-                style={{
-                  textAlign: "left",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  opacity: v.is_open ? 1 : 0.5,
-                  cursor: v.is_open ? "pointer" : "not-allowed",
-                }}
-              >
-                <div>
-                  <strong>{v.name}</strong>
-                  <div style={{ fontSize: 13, opacity: 0.7 }}>
-                    Bâtiment {v.building.letter}{v.building.number}
-                  </div>
-                </div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    background: v.is_open ? "#e5f5ef" : "#f1ede2",
-                    color: v.is_open ? "var(--teal)" : "#888",
-                  }}
-                >
-                  {v.is_open ? "Ouvert" : "Fermé"}
-                </span>
-              </button>
-            ))}
-            {!vendors.length && <p style={{ opacity: 0.6 }}>Aucun vendeur pour le moment.</p>}
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <button
+              className="btn"
+              style={{
+                flex: 1,
+                background: view === "vendors" ? "var(--teal)" : "#f1ede2",
+                color: view === "vendors" ? "#fff" : "inherit",
+                boxShadow: "none",
+              }}
+              onClick={() => setView("vendors")}
+            >
+              Vendeurs
+            </button>
+            <button
+              className="btn"
+              style={{
+                flex: 1,
+                background: view === "history" ? "var(--teal)" : "#f1ede2",
+                color: view === "history" ? "#fff" : "inherit",
+                boxShadow: "none",
+              }}
+              onClick={() => setView("history")}
+            >
+              Mes achats
+            </button>
           </div>
+
+          {view === "history" ? (
+            <>
+              <div className="card" style={{ marginBottom: 16 }}>
+                <p style={{ fontWeight: 700 }}>Total dépensé : {totalSpent} FCFA</p>
+                <p style={{ fontSize: 12, opacity: 0.6 }}>(commandes confirmées uniquement)</p>
+              </div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {orderHistory.map((o) => {
+                  const statusInfo = STATUS_LABELS[o.status] || { label: o.status, color: "#888" };
+                  return (
+                    <div key={o.id} className="card">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <strong>{o.vendor?.name || "Vendeur"}</strong>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: statusInfo.color }}>{statusInfo.label}</span>
+                      </div>
+                      <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 6 }}>
+                        {o.items.map((it, i) => (
+                          <div key={i}>
+                            {it.quantity} × {it.product.name} ({it.unit_price} FCFA/u)
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                        <span style={{ opacity: 0.6 }}>
+                          {new Date(o.created_at).toLocaleDateString("fr-FR")} —{" "}
+                          {o.is_debt ? "Dette" : o.payment_method?.label || "—"}
+                        </span>
+                        <strong>{o.total} FCFA</strong>
+                      </div>
+                    </div>
+                  );
+                })}
+                {!orderHistory.length && <p style={{ opacity: 0.6 }}>Aucun achat pour le moment.</p>}
+              </div>
+            </>
+          ) : (
+            <>
+              {debtTotal > 0 && (
+                <div className="card" style={{ marginBottom: 16, borderColor: "#e59a3d" }}>
+                  <p style={{ fontWeight: 700, marginBottom: 6 }}>
+                    Dette actuelle : {debtTotal} FCFA <span style={{ fontWeight: 400, opacity: 0.7 }}>(plafond 1000 FCFA)</span>
+                  </p>
+                  <div style={{ display: "grid", gap: 4 }}>
+                    {debts.map((d) => (
+                      <div key={d.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, opacity: 0.8 }}>
+                        <span>{d.order?.vendor?.name || "Vendeur"} — {new Date(d.created_at).toLocaleDateString("fr-FR")}</span>
+                        <span>{d.amount} FCFA</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: 12, opacity: 0.6, marginTop: 8 }}>
+                    Pour rembourser, paie en liquide chez n&apos;importe quel vendeur : il enregistrera le remboursement dans l&apos;appli.
+                  </p>
+                </div>
+              )}
+
+              <h2 style={{ fontSize: 18, marginBottom: 12 }}>Vendeurs</h2>
+              <div style={{ display: "grid", gap: 10 }}>
+                {vendors.map((v) => (
+                  <button
+                    key={v.id}
+                    onClick={() => v.is_open && openVendor(v)}
+                    className="card"
+                    style={{
+                      textAlign: "left",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      opacity: v.is_open ? 1 : 0.5,
+                      cursor: v.is_open ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    <div>
+                      <strong>{v.name}</strong>
+                      <div style={{ fontSize: 13, opacity: 0.7 }}>
+                        Bâtiment {v.building.letter}{v.building.number}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        padding: "4px 10px",
+                        borderRadius: 999,
+                        background: v.is_open ? "#e5f5ef" : "#f1ede2",
+                        color: v.is_open ? "var(--teal)" : "#888",
+                      }}
+                    >
+                      {v.is_open ? "Ouvert" : "Fermé"}
+                    </span>
+                  </button>
+                ))}
+                {!vendors.length && <p style={{ opacity: 0.6 }}>Aucun vendeur pour le moment.</p>}
+              </div>
+            </>
+          )}
         </>
       ) : (
         <>
@@ -176,7 +309,7 @@ export default function ClientPage() {
               {paymentMethods.map((p) => (
                 <option key={p.id} value={p.id}>{p.label}</option>
               ))}
-              <option value="debt">Dette (à rembourser, max 1000 FCFA)</option>
+              <option value="debt">Dette (à rembourser, plafond 1000 FCFA — reste {Math.max(0, 1000 - debtTotal)} FCFA disponible)</option>
             </select>
 
             {message && <p style={{ color: message.includes("succès") ? "var(--teal)" : "#c0392b", fontWeight: 600, marginBottom: 10 }}>{message}</p>}

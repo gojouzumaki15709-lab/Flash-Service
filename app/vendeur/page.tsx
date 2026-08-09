@@ -24,6 +24,9 @@ type PendingOrder = {
   items: PendingOrderItem[];
 };
 
+type DebtEntry = { id: string; amount: number; created_at: string };
+type DebtClient = { id: string; name: string; phone: string };
+
 export default function VendorPage() {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
@@ -36,6 +39,13 @@ export default function VendorPage() {
   const [editQty, setEditQty] = useState<Record<string, Record<string, number>>>({}); // orderId -> itemId -> qty
   const [editCash, setEditCash] = useState<Record<string, string>>({}); // orderId -> montant saisi
   const [confirmMessage, setConfirmMessage] = useState<Record<string, string>>({});
+
+  const [debtPhone, setDebtPhone] = useState("");
+  const [debtClient, setDebtClient] = useState<DebtClient | null>(null);
+  const [debtList, setDebtList] = useState<DebtEntry[]>([]);
+  const [selectedDebtIds, setSelectedDebtIds] = useState<Record<string, boolean>>({});
+  const [debtCash, setDebtCash] = useState("");
+  const [debtMessage, setDebtMessage] = useState("");
 
   async function loadStock() {
     const res = await fetch("/api/vendor/stock");
@@ -110,6 +120,54 @@ export default function VendorPage() {
     }
     loadPendingOrders();
     loadStock();
+  }
+
+  async function searchDebtClient() {
+    setDebtMessage("");
+    setDebtClient(null);
+    setDebtList([]);
+    setSelectedDebtIds({});
+    setDebtCash("");
+    if (!debtPhone.trim()) return;
+
+    const res = await fetch(`/api/vendor/debts?phone=${encodeURIComponent(debtPhone.trim())}`);
+    const data = await res.json();
+    if (!res.ok) {
+      setDebtMessage(data.error || "Erreur.");
+      return;
+    }
+    setDebtClient(data.client);
+    setDebtList(data.debts || []);
+    if (!data.debts?.length) setDebtMessage("Ce client n'a aucune dette en cours.");
+  }
+
+  const selectedDebtTotal = debtList
+    .filter((d) => selectedDebtIds[d.id])
+    .reduce((sum, d) => sum + Number(d.amount), 0);
+
+  async function confirmDebtRepayment() {
+    setDebtMessage("");
+    const debtIds = Object.keys(selectedDebtIds).filter((id) => selectedDebtIds[id]);
+    if (!debtClient || !debtIds.length) {
+      setDebtMessage("Sélectionne au moins une dette.");
+      return;
+    }
+    const res = await fetch("/api/vendor/debts", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: debtClient.id,
+        debtIds,
+        cashAmountReceived: debtCash !== "" ? Number(debtCash) : selectedDebtTotal,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setDebtMessage(data.error || "Erreur.");
+      return;
+    }
+    setDebtMessage("Remboursement enregistré !");
+    searchDebtClient();
   }
 
   async function toggleOpen() {
@@ -250,6 +308,65 @@ export default function VendorPage() {
           </div>
         ))}
         {!pendingOrders.length && <p style={{ opacity: 0.6, fontSize: 14 }}>Aucune commande en attente.</p>}
+      </div>
+
+      <h2 style={{ fontSize: 16, marginBottom: 10 }}>Remboursement de dette</h2>
+      <div className="card" style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <input
+            type="tel"
+            placeholder="Téléphone du client"
+            value={debtPhone}
+            onChange={(e) => setDebtPhone(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <button className="btn btn-primary" onClick={searchDebtClient}>
+            Rechercher
+          </button>
+        </div>
+
+        {debtClient && (
+          <>
+            <p style={{ fontWeight: 700, marginBottom: 8 }}>{debtClient.name} — {debtClient.phone}</p>
+            {debtList.map((d) => (
+              <label key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={!!selectedDebtIds[d.id]}
+                  onChange={(e) => setSelectedDebtIds((s) => ({ ...s, [d.id]: e.target.checked }))}
+                />
+                <span>{d.amount} FCFA — {new Date(d.created_at).toLocaleDateString("fr-FR")}</span>
+              </label>
+            ))}
+            {!!debtList.length && (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "10px 0" }}>
+                  <span style={{ fontSize: 13, opacity: 0.7 }}>Total sélectionné : {selectedDebtTotal} FCFA</span>
+                  <div>
+                    <label style={{ fontSize: 12, opacity: 0.7, marginRight: 4 }}>Somme reçue :</label>
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder={String(selectedDebtTotal)}
+                      value={debtCash}
+                      onChange={(e) => setDebtCash(e.target.value)}
+                      style={{ width: 90, textAlign: "center" }}
+                    />
+                  </div>
+                </div>
+                <button className="btn btn-primary" style={{ width: "100%" }} onClick={confirmDebtRepayment}>
+                  Confirmer le remboursement
+                </button>
+              </>
+            )}
+          </>
+        )}
+
+        {debtMessage && (
+          <p style={{ color: debtMessage.includes("enregistré") ? "var(--teal)" : "#c0392b", fontWeight: 600, marginTop: 8, fontSize: 13 }}>
+            {debtMessage}
+          </p>
+        )}
       </div>
 
       <h2 style={{ fontSize: 16, marginBottom: 10 }}>Mon stock</h2>

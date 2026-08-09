@@ -47,7 +47,8 @@ create table vendors (
 -- ------------------------------------------------------------
 create table clients (
   id uuid primary key default gen_random_uuid(),
-  phone text not null unique,
+  username text not null unique,      -- identifiant de connexion
+  phone text not null unique,         -- gardé comme contact, plus utilisé pour se connecter
   name text not null,
   password_hash text not null,
   created_at timestamptz not null default now()

@@ -130,11 +130,26 @@ export default function ClientPage() {
       return;
     }
 
-    // Paiement Wave : on redirige tout de suite vers wave_launch_url.
-    // Important : c'est une redirection de navigateur classique, jamais une
-    // ouverture dans une iframe/webview, sinon l'app Wave ne peut pas s'ouvrir.
-    if (data.waveLaunchUrl) {
+    // Paiement Wave en mode API : redirection classique de navigateur vers
+    // wave_launch_url (jamais en iframe/webview, sinon l'app Wave ne s'ouvre pas).
+    if (data.waveLaunchUrl && data.waveMode === "api") {
       window.location.href = data.waveLaunchUrl;
+      return;
+    }
+
+    // Paiement Wave en mode lien simple : pas de confirmation automatique.
+    // On ouvre le lien marchand dans un nouvel onglet et on explique au client
+    // qu'il doit payer EXACTEMENT le montant affiché, puis attendre que le
+    // vendeur confirme la réception du paiement dans l'appli.
+    if (data.waveLaunchUrl && data.waveMode === "link") {
+      window.open(data.waveLaunchUrl, "_blank");
+      setMessage(
+        `Commande enregistrée. Paie exactement ${total} FCFA via Wave (lien ouvert dans un nouvel onglet), puis patiente : le vendeur confirmera ta commande dès réception du paiement.`
+      );
+      setCart({});
+      openVendor(selectedVendor!);
+      loadDebts();
+      setHistoryLoaded(false);
       return;
     }
 

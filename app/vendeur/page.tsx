@@ -21,6 +21,7 @@ type PendingOrder = {
   total: number;
   created_at: string;
   client: { name: string; phone: string };
+  payment_method: { type: string; label: string } | null;
   items: PendingOrderItem[];
 };
 
@@ -227,7 +228,7 @@ export default function VendorPage() {
       </div>
 
       <h2 style={{ fontSize: 16, marginBottom: 10 }}>
-        Commandes en attente (paiement liquide)
+        Commandes en attente de confirmation
         {!!pendingOrders.length && (
           <span className="badge badge-warning" style={{ marginLeft: 8 }}>
             {pendingOrders.length}
@@ -240,6 +241,21 @@ export default function VendorPage() {
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
               <strong>{order.client?.name}</strong>
               <span style={{ fontSize: 13, opacity: 0.7 }}>{order.client?.phone}</span>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "3px 8px",
+                  borderRadius: 999,
+                  background: order.payment_method?.type === "wave" ? "#e6f0ff" : "#fff3e0",
+                  color: order.payment_method?.type === "wave" ? "#1d4ed8" : "#b7791f",
+                }}
+              >
+                {order.payment_method?.label || "Liquide"}
+                {order.payment_method?.type === "wave" && " — vérifie ta réception Wave avant de confirmer"}
+              </span>
             </div>
 
             <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
@@ -271,7 +287,9 @@ export default function VendorPage() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <span style={{ fontSize: 13, opacity: 0.7 }}>Total attendu : {orderComputedTotal(order)} FCFA</span>
               <div>
-                <label style={{ fontSize: 12, opacity: 0.7, marginRight: 4 }}>Somme reçue :</label>
+                <label style={{ fontSize: 12, opacity: 0.7, marginRight: 4 }}>
+                  {order.payment_method?.type === "wave" ? "Somme reçue sur Wave :" : "Somme reçue :"}
+                </label>
                 <input
                   type="number"
                   min={0}

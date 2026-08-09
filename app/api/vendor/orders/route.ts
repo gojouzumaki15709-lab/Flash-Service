@@ -13,7 +13,7 @@ export async function GET() {
   const { data, error } = await db
     .from("orders")
     .select(
-      "id, total, created_at, client:clients(name, phone), items:order_items(id, quantity, unit_price, product:products(id, name))"
+      "id, total, created_at, client:clients(name, phone), payment_method:payment_methods(type, label), items:order_items(id, quantity, unit_price, product:products(id, name))"
     )
     .eq("vendor_id", session.id)
     .eq("status", "pending")

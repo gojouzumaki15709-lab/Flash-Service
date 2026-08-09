@@ -60,29 +60,50 @@ export async function POST(req: NextRequest) {
   //    - wave : commande "pending" tant que Wave n'a pas confirmé le paiement via webhook.
   //    - autre / dette : "confirmed" immédiatement.
   let paymentType: string | null = null;
-  let wavePaymentMethod: { id: string; api_key_encrypted: string | null; is_active: boolean } | null = null;
+  let wavePaymentMethod: {
+    id: string;
+    api_key_encrypted: string | null;
+    merchant_link: string | null;
+    is_active: boolean;
+  } | null = null;
   if (paymentMethodId) {
     const { data: pm } = await db
       .from("payment_methods")
-      .select("id, type, api_key_encrypted, is_active")
+      .select("id, type, api_key_encrypted, merchant_link, is_active")
       .eq("id", paymentMethodId)
       .single();
-    const pmData = pm as { id: string; type: string; api_key_encrypted: string | null; is_active: boolean } | null;
+    const pmData = pm as {
+      id: string;
+      type: string;
+      api_key_encrypted: string | null;
+      merchant_link: string | null;
+      is_active: boolean;
+    } | null;
     paymentType = pmData?.type || null;
     if (paymentType === "wave" && pmData) {
-      wavePaymentMethod = { id: pmData.id, api_key_encrypted: pmData.api_key_encrypted, is_active: pmData.is_active };
+      wavePaymentMethod = {
+        id: pmData.id,
+        api_key_encrypted: pmData.api_key_encrypted,
+        merchant_link: pmData.merchant_link,
+        is_active: pmData.is_active,
+      };
     }
   }
   const isCash = paymentType === "cash";
   const isWave = paymentType === "wave";
+  // Tant que la clé API Wave n'est pas configurée, on retombe automatiquement
+  // sur le mode "lien simple" : le client paie via le lien marchand statique,
+  // puis le vendeur confirme manuellement (comme pour le liquide).
+  const isWaveApiMode = isWave && !!wavePaymentMethod?.api_key_encrypted;
+  const isWaveLinkMode = isWave && !wavePaymentMethod?.api_key_encrypted;
 
   if (isWave) {
     if (!wavePaymentMethod?.is_active) {
       return NextResponse.json({ error: "Le paiement Wave n'est pas disponible actuellement." }, { status: 400 });
     }
-    if (!wavePaymentMethod.api_key_encrypted) {
+    if (isWaveLinkMode && !wavePaymentMethod.merchant_link) {
       return NextResponse.json(
-        { error: "Le paiement Wave n'est pas encore configuré (clé API manquante). Contacte l'admin." },
+        { error: "Le paiement Wave n'est pas encore configuré (aucun lien marchand). Contacte l'admin." },
         { status: 400 }
       );
     }
@@ -118,7 +139,7 @@ export async function POST(req: NextRequest) {
       payment_method_id: paymentMethodId || null,
       is_debt: !!isDebt,
       total,
-      status: isCash || isWave ? "pending" : "confirmed",
+      status: isCash || isWaveApiMode || isWaveLinkMode ? "pending" : "confirmed",
     })
     .select()
     .single();
@@ -146,10 +167,10 @@ export async function POST(req: NextRequest) {
     await db.from("debts").insert({ client_id: session.id, order_id: order.id, amount: total });
   }
 
-  // 8. Si Wave : créer la session de paiement et renvoyer le lien de redirection.
-  //    Si Wave échoue, on annule proprement la commande et on restitue le stock
-  //    (le client n'a encore rien payé à ce stade).
-  if (isWave && wavePaymentMethod) {
+  // 8a. Mode API Wave (clé configurée) : créer une vraie session de paiement.
+  //     Si Wave échoue, on annule proprement la commande et on restitue le stock
+  //     (le client n'a encore rien payé à ce stade).
+  if (isWaveApiMode && wavePaymentMethod) {
     const base = siteUrl(req);
     try {
       const waveSession = await createWaveCheckoutSession({
@@ -162,7 +183,7 @@ export async function POST(req: NextRequest) {
 
       await db.from("orders").update({ wave_checkout_id: waveSession.id }).eq("id", order.id);
 
-      return NextResponse.json({ ok: true, order, waveLaunchUrl: waveSession.wave_launch_url });
+      return NextResponse.json({ ok: true, order, waveLaunchUrl: waveSession.wave_launch_url, waveMode: "api" });
     } catch (err) {
       // Rollback : on restitue le stock réservé et on annule la commande.
       for (const item of items) {
@@ -181,6 +202,18 @@ export async function POST(req: NextRequest) {
         { status: 502 }
       );
     }
+  }
+
+  // 8b. Mode lien simple (pas de clé API configurée) : on renvoie juste le lien
+  //     marchand statique. Le client paie manuellement le montant exact via ce
+  //     lien, puis le vendeur confirme la réception du paiement (comme le liquide).
+  if (isWaveLinkMode && wavePaymentMethod) {
+    return NextResponse.json({
+      ok: true,
+      order,
+      waveLaunchUrl: wavePaymentMethod.merchant_link,
+      waveMode: "link",
+    });
   }
 
   return NextResponse.json({ ok: true, order });

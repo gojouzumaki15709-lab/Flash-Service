@@ -119,8 +119,22 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
     load();
   }
 
-  async function removeVendor(id: string) {
-    await fetch(`/api/admin/vendors/${id}`, { method: "DELETE" });
+  async function removeVendor(id: string, name: string) {
+    if (!confirm(`Désactiver le vendeur "${name}" ? Il ne pourra plus se connecter ni gérer son stock, mais son historique (commandes, remboursements) est conservé.`)) return;
+    const res = await fetch(`/api/admin/vendors/${id}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return setError(data.error || "Erreur lors de la désactivation.");
+    load();
+  }
+
+  async function setVendorActive(id: string, isActive: boolean) {
+    const res = await fetch(`/api/admin/vendors/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return setError(data.error || "Erreur.");
     load();
   }
 
@@ -146,7 +160,11 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
           <div key={v.id} className="card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <strong>{v.name}</strong> ({v.code})
+                <strong>{v.name}</strong> ({v.code}) {v.is_active === false && (
+                  <span style={{ fontSize: 11, color: "#c0392b", border: "1px solid #c0392b", borderRadius: 4, padding: "1px 6px", marginLeft: 6 }}>
+                    Désactivé
+                  </span>
+                )}
                 <div style={{ fontSize: 13, opacity: 0.7 }}>
                   Bâtiment {v.building?.letter}{v.building?.number} — {v.is_open ? "Ouvert" : "Fermé"}
                 </div>
@@ -159,9 +177,15 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
                 >
                   {expandedVendorId === v.id ? "Fermer" : "Gérer le stock"}
                 </button>
-                <button className="btn" style={{ background: "#fbe4e0", color: "#c0392b", boxShadow: "none", fontSize: 12 }} onClick={() => removeVendor(v.id)}>
-                  Supprimer
-                </button>
+                {v.is_active === false ? (
+                  <button className="btn" style={{ background: "#e0f0e4", color: "#1e7a34", boxShadow: "none", fontSize: 12 }} onClick={() => setVendorActive(v.id, true)}>
+                    Réactiver
+                  </button>
+                ) : (
+                  <button className="btn" style={{ background: "#fbe4e0", color: "#c0392b", boxShadow: "none", fontSize: 12 }} onClick={() => removeVendor(v.id, v.name)}>
+                    Supprimer
+                  </button>
+                )}
               </div>
             </div>
             {expandedVendorId === v.id && <VendorStockManager vendorId={v.id} />}

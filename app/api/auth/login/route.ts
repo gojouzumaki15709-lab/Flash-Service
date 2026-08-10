@@ -26,6 +26,12 @@ export async function POST(req: NextRequest) {
   // 2. Essayer vendeur
   const { data: vendor } = await db.from("vendors").select("*").eq("code", identifier).maybeSingle();
   if (vendor && (await verifyPassword(password, vendor.password_hash))) {
+    if (vendor.is_active === false) {
+      // Mot de passe correct, mais compte désactivé par un admin : on ne
+      // délivre pas de session. Message générique, cohérent avec le reste
+      // de la route (on ne veut pas révéler l'existence du compte non plus).
+      return NextResponse.json({ error: "Identifiant ou mot de passe incorrect." }, { status: 401 });
+    }
     await createSession({ id: vendor.id, role: "vendor", name: vendor.name, buildingId: vendor.building_id });
     return NextResponse.json({ ok: true, redirect: "/vendeur" });
   }

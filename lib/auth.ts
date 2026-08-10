@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { supabaseAdmin } from "@/lib/supabaseServer";
 
 export type Role = "admin" | "vendor" | "client";
 
@@ -50,12 +51,33 @@ export async function createSession(payload: SessionPayload) {
 export async function getSession(): Promise<SessionPayload | null> {
   const token = cookies().get(COOKIE_NAME)?.value;
   if (!token) return null;
+  let payload: SessionPayload;
   try {
-    const { payload } = await jwtVerify(token, secretKey());
-    return payload as unknown as SessionPayload;
+    const verified = await jwtVerify(token, secretKey());
+    payload = verified.payload as unknown as SessionPayload;
   } catch {
     return null;
   }
+
+  // Un JWT valide ne suffit plus : pour un vendeur, on revérifie en base
+  // qu'il est toujours actif. Sans ça, un vendeur désactivé/supprimé par
+  // un admin garde un accès complet jusqu'à expiration du cookie (30 jours).
+  // Ce coût (une requête DB par appel de getSession) est volontairement
+  // accepté : la révocation immédiate prime sur la latence ici.
+  if (payload.role === "vendor") {
+    const db = supabaseAdmin();
+    const { data: vendor, error } = await db
+      .from("vendors")
+      .select("is_active")
+      .eq("id", payload.id)
+      .maybeSingle();
+
+    if (error || !vendor || vendor.is_active === false) {
+      return null;
+    }
+  }
+
+  return payload;
 }
 
 export async function destroySession() {

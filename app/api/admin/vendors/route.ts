@@ -13,7 +13,7 @@ export async function GET() {
   const db = supabaseAdmin();
   const { data, error } = await db
     .from("vendors")
-    .select("id, code, name, is_open, building:buildings(letter, number)")
+    .select("id, code, name, is_open, is_active, building:buildings(letter, number)")
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ vendors: data });

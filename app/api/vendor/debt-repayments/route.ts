@@ -34,45 +34,42 @@ export async function PATCH(req: NextRequest) {
   }
 
   const db = supabaseAdmin();
-  const { data: repayment } = await db
-    .from("debt_repayments")
-    .select("id, status, amount, debt_ids")
-    .eq("id", repaymentId)
-    .single();
 
-  if (!repayment) return NextResponse.json({ error: "Demande introuvable." }, { status: 404 });
-  if (repayment.status !== "pending") {
-    return NextResponse.json({ error: "Cette demande n'est plus en attente." }, { status: 400 });
-  }
-
+  // Verrouillage + vérification + écriture atomiques côté PostgreSQL
+  // (voir supabase/migration_hardening.sql) : empêche deux vendeurs de
+  // confirmer/rejeter la même demande en même temps.
   if (action === "reject") {
-    await db.from("debt_repayments").update({ status: "cancelled" }).eq("id", repaymentId);
+    const { error } = await db.rpc("reject_debt_repayment_atomic", { p_repayment_id: repaymentId });
+    if (error) {
+      const code = (error.message || "").split(":")[0];
+      if (code === "NOT_FOUND") return NextResponse.json({ error: "Demande introuvable." }, { status: 404 });
+      if (code === "ALREADY_PROCESSED")
+        return NextResponse.json({ error: "Cette demande n'est plus en attente." }, { status: 400 });
+      return NextResponse.json({ error: "Erreur lors du rejet." }, { status: 500 });
+    }
     return NextResponse.json({ ok: true });
   }
 
-  const received = cashAmountReceived != null && cashAmountReceived !== "" ? Number(cashAmountReceived) : repayment.amount;
-  if (received < repayment.amount) {
-    return NextResponse.json(
-      { error: `La somme reçue (${received} FCFA) est inférieure au montant attendu (${repayment.amount} FCFA).` },
-      { status: 400 }
-    );
+  const received = cashAmountReceived != null && cashAmountReceived !== "" ? Number(cashAmountReceived) : null;
+  if (received != null && (!Number.isFinite(received) || received < 0)) {
+    return NextResponse.json({ error: "Somme reçue invalide." }, { status: 400 });
   }
 
-  // Marquer les dettes couvertes comme remboursées
-  await db
-    .from("debts")
-    .update({ is_repaid: true, repaid_at: new Date().toISOString() })
-    .in("id", repayment.debt_ids);
+  const { error } = await db.rpc("confirm_debt_repayment_atomic", {
+    p_repayment_id: repaymentId,
+    p_vendor_id: session.id,
+    p_cash_amount_received: received,
+  });
 
-  await db
-    .from("debt_repayments")
-    .update({
-      status: "confirmed",
-      confirmed_by_vendor_id: session.id,
-      cash_amount_received: received,
-      confirmed_at: new Date().toISOString(),
-    })
-    .eq("id", repaymentId);
+  if (error) {
+    const code = (error.message || "").split(":")[0];
+    if (code === "NOT_FOUND") return NextResponse.json({ error: "Demande introuvable." }, { status: 404 });
+    if (code === "ALREADY_PROCESSED")
+      return NextResponse.json({ error: "Cette demande n'est plus en attente." }, { status: 400 });
+    if (code === "INSUFFICIENT_AMOUNT_RECEIVED")
+      return NextResponse.json({ error: "La somme reçue est inférieure au montant attendu." }, { status: 400 });
+    return NextResponse.json({ error: "Erreur lors de la confirmation." }, { status: 500 });
+  }
 
   return NextResponse.json({ ok: true });
 }

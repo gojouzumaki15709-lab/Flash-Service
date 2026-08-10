@@ -9,8 +9,8 @@ export async function POST(req: NextRequest) {
   if (!username || !phone || !name || !password) {
     return NextResponse.json({ error: "Champs manquants." }, { status: 400 });
   }
-  if (password.length < 4) {
-    return NextResponse.json({ error: "Mot de passe trop court (4 caractères minimum)." }, { status: 400 });
+  if (password.length < 8) {
+    return NextResponse.json({ error: "Mot de passe trop court (8 caractères minimum)." }, { status: 400 });
   }
 
   const db = supabaseAdmin();

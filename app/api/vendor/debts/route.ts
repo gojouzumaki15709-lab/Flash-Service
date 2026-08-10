@@ -47,31 +47,31 @@ export async function PATCH(req: NextRequest) {
 
   const db = supabaseAdmin();
 
-  // Vérifier que les dettes sélectionnées appartiennent bien à ce client et sont non remboursées
-  const { data: debts } = await db
-    .from("debts")
-    .select("id, client_id, amount, is_repaid")
-    .in("id", debtIds);
-
-  const invalid = (debts || []).find((d) => d.client_id !== clientId || d.is_repaid);
-  if (!debts || debts.length !== debtIds.length || invalid) {
-    return NextResponse.json({ error: "Sélection de dettes invalide." }, { status: 400 });
+  const received = cashAmountReceived != null && cashAmountReceived !== "" ? Number(cashAmountReceived) : null;
+  if (received != null && (!Number.isFinite(received) || received < 0)) {
+    return NextResponse.json({ error: "Somme reçue invalide." }, { status: 400 });
   }
 
-  const expectedTotal = debts.reduce((sum, d) => sum + Number(d.amount), 0);
-  const received = cashAmountReceived != null && cashAmountReceived !== "" ? Number(cashAmountReceived) : expectedTotal;
+  // Vérification de propriété + verrouillage + écriture atomiques côté
+  // PostgreSQL (voir mark_debts_repaid_atomic dans
+  // supabase/migration_hardening.sql).
+  const { data: rpcResult, error } = await db.rpc("mark_debts_repaid_atomic", {
+    p_client_id: clientId,
+    p_debt_ids: debtIds,
+    p_cash_amount_received: received,
+  });
 
-  if (received < expectedTotal) {
-    return NextResponse.json(
-      { error: `La somme reçue (${received} FCFA) est inférieure au total des dettes sélectionnées (${expectedTotal} FCFA).` },
-      { status: 400 }
-    );
+  if (error || !rpcResult) {
+    const code = (error?.message || "").split(":")[0];
+    if (code === "INVALID_DEBT_SELECTION")
+      return NextResponse.json({ error: "Sélection de dettes invalide." }, { status: 400 });
+    if (code === "INSUFFICIENT_AMOUNT_RECEIVED")
+      return NextResponse.json(
+        { error: "La somme reçue est inférieure au total des dettes sélectionnées." },
+        { status: 400 }
+      );
+    return NextResponse.json({ error: "Erreur lors du remboursement." }, { status: 500 });
   }
-
-  await db
-    .from("debts")
-    .update({ is_repaid: true, repaid_at: new Date().toISOString() })
-    .in("id", debtIds);
 
   return NextResponse.json({ ok: true });
 }

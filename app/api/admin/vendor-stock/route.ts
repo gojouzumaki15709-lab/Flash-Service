@@ -31,6 +31,10 @@ export async function POST(req: NextRequest) {
   if (!vendorId || !productId || quantity === undefined) {
     return NextResponse.json({ error: "Champs manquants." }, { status: 400 });
   }
+  const qty = Number(quantity);
+  if (!Number.isInteger(qty) || qty < 0) {
+    return NextResponse.json({ error: "Quantité invalide (doit être un entier positif ou nul)." }, { status: 400 });
+  }
 
   const db = supabaseAdmin();
   const { data: existing } = await db
@@ -43,10 +47,10 @@ export async function POST(req: NextRequest) {
   if (existing) {
     await db
       .from("vendor_stock")
-      .update({ quantity, updated_at: new Date().toISOString() })
+      .update({ quantity: qty, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
   } else {
-    await db.from("vendor_stock").insert({ vendor_id: vendorId, product_id: productId, quantity });
+    await db.from("vendor_stock").insert({ vendor_id: vendorId, product_id: productId, quantity: qty });
   }
 
   return NextResponse.json({ ok: true });

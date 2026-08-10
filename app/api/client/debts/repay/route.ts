@@ -21,34 +21,6 @@ export async function POST(req: NextRequest) {
 
   const db = supabaseAdmin();
 
-  // Vérifier que ces dettes appartiennent bien au client et sont non remboursées
-  const { data: debts } = await db
-    .from("debts")
-    .select("id, client_id, amount, is_repaid")
-    .in("id", debtIds);
-
-  const invalid = (debts || []).find((d) => d.client_id !== session.id || d.is_repaid);
-  if (!debts || debts.length !== debtIds.length || invalid) {
-    return NextResponse.json({ error: "Sélection de dettes invalide." }, { status: 400 });
-  }
-
-  const amount = debts.reduce((sum, d) => sum + Number(d.amount), 0);
-
-  // Vérifier qu'il n'y a pas déjà une demande de remboursement en attente sur ces dettes
-  const { data: existingPending } = await db
-    .from("debt_repayments")
-    .select("id, debt_ids")
-    .eq("client_id", session.id)
-    .eq("status", "pending");
-
-  const alreadyPending = (existingPending || []).some((r) => r.debt_ids.some((id: string) => debtIds.includes(id)));
-  if (alreadyPending) {
-    return NextResponse.json(
-      { error: "Une demande de remboursement est déjà en attente pour au moins une de ces dettes." },
-      { status: 409 }
-    );
-  }
-
   let paymentType: string | null = null;
   let merchantLink: string | null = null;
   let apiKey: string | null = null;
@@ -71,21 +43,29 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { data: repayment, error } = await db
-    .from("debt_repayments")
-    .insert({
-      client_id: session.id,
-      debt_ids: debtIds,
-      amount,
-      payment_method_id: paymentMethodId || null,
-      status: "pending",
-    })
-    .select()
-    .single();
+  // Vérifie la propriété des dettes, l'absence de demande concurrente
+  // couvrant les mêmes dettes, et crée la demande — tout de façon
+  // atomique (verrou consultatif par client) côté PostgreSQL. Voir
+  // create_debt_repayment_atomic dans supabase/migration_hardening.sql.
+  const { data: rpcResult, error } = await db.rpc("create_debt_repayment_atomic", {
+    p_client_id: session.id,
+    p_debt_ids: debtIds,
+    p_payment_method_id: paymentMethodId || null,
+  });
 
-  if (error || !repayment) {
+  if (error || !rpcResult) {
+    const code = (error?.message || "").split(":")[0];
+    if (code === "INVALID_DEBT_SELECTION")
+      return NextResponse.json({ error: "Sélection de dettes invalide." }, { status: 400 });
+    if (code === "REPAYMENT_ALREADY_PENDING")
+      return NextResponse.json(
+        { error: "Une demande de remboursement est déjà en attente pour au moins une de ces dettes." },
+        { status: 409 }
+      );
     return NextResponse.json({ error: "Erreur lors de la création de la demande." }, { status: 500 });
   }
+
+  const repayment = { id: rpcResult.repayment_id, amount: rpcResult.amount };
 
   // Wave en mode lien simple (pas de clé API) : on renvoie juste le lien marchand.
   if (paymentType === "wave" && !apiKey && merchantLink) {

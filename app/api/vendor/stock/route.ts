@@ -24,6 +24,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Non autorisé." }, { status: 401 });
   }
   const { productId, quantity } = await req.json();
+  const qty = Number(quantity);
+  if (!productId || !Number.isInteger(qty) || qty < 0) {
+    return NextResponse.json({ error: "Quantité invalide (doit être un entier positif ou nul)." }, { status: 400 });
+  }
   const db = supabaseAdmin();
 
   const { data: existing } = await db
@@ -36,10 +40,10 @@ export async function POST(req: NextRequest) {
   if (existing) {
     await db
       .from("vendor_stock")
-      .update({ quantity, updated_at: new Date().toISOString() })
+      .update({ quantity: qty, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
   } else {
-    await db.from("vendor_stock").insert({ vendor_id: session.id, product_id: productId, quantity });
+    await db.from("vendor_stock").insert({ vendor_id: session.id, product_id: productId, quantity: qty });
   }
 
   return NextResponse.json({ ok: true });

@@ -73,6 +73,31 @@ export async function POST(req: NextRequest) {
   }
 
   if (event.type === "checkout.session.completed" && event.data?.payment_status === "succeeded") {
+    // Vérifie que ce que Wave dit avoir encaissé correspond bien à la
+    // commande retrouvée : montant exact et devise XOF. Sans ce contrôle,
+    // un événement valide (signature correcte) mais portant sur un
+    // montant/checkout différent aurait quand même pu confirmer la
+    // commande.
+    const { data: orderRow } = await db.from("orders").select("total").eq("id", order.id).single();
+    const expectedAmount = orderRow ? Math.round(Number(orderRow.total)) : null;
+    const waveAmount = event.data?.amount != null ? Math.round(Number(event.data.amount)) : null;
+    const waveCurrency = event.data?.currency;
+    const checkoutIdMatches =
+      !order.wave_checkout_id || !event.data?.id || event.data.id === order.wave_checkout_id;
+
+    if (
+      expectedAmount == null ||
+      waveAmount == null ||
+      waveAmount !== expectedAmount ||
+      (waveCurrency && waveCurrency !== "XOF") ||
+      !checkoutIdMatches
+    ) {
+      // On enregistre quand même l'événement (déjà fait ci-dessus, pour
+      // l'idempotence) mais on refuse de confirmer une commande dont le
+      // montant/devise/checkout ne correspond pas.
+      return NextResponse.json({ ok: true, ignored: "Montant, devise ou session ne correspondent pas." });
+    }
+
     await db
       .from("orders")
       .update({
@@ -82,29 +107,9 @@ export async function POST(req: NextRequest) {
       })
       .eq("id", order.id);
   } else if (event.type === "checkout.session.payment_failed") {
-    // Le paiement a échoué : on annule la commande et on restitue le stock
-    // qui avait été réservé à la création de la commande.
-    const { data: orderItems } = await db
-      .from("order_items")
-      .select("product_id, quantity")
-      .eq("order_id", order.id);
-
-    for (const item of orderItems || []) {
-      const { data: stockRow } = await db
-        .from("vendor_stock")
-        .select("id, quantity")
-        .eq("vendor_id", order.vendor_id)
-        .eq("product_id", item.product_id)
-        .maybeSingle();
-      if (stockRow) {
-        await db
-          .from("vendor_stock")
-          .update({ quantity: stockRow.quantity + item.quantity, updated_at: new Date().toISOString() })
-          .eq("id", stockRow.id);
-      }
-    }
-
-    await db.from("orders").update({ status: "cancelled" }).eq("id", order.id);
+    // Le paiement a échoué : annule la commande et restitue le stock
+    // réservé, de façon atomique (verrouillage des lignes de stock).
+    await db.rpc("cancel_pending_order_atomic", { p_order_id: order.id });
   }
 
   return NextResponse.json({ ok: true });

@@ -14,7 +14,13 @@ export interface SessionPayload {
 const COOKIE_NAME = "session";
 
 function secretKey() {
-  return new TextEncoder().encode(process.env.SESSION_SECRET || "dev-secret");
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
+    // Pas de valeur de secours : mieux vaut planter au démarrage que de
+    // signer des sessions avec un secret prévisible en production.
+    throw new Error("SESSION_SECRET is required (aucune valeur de secours autorisée).");
+  }
+  return new TextEncoder().encode(secret);
 }
 
 export async function hashPassword(password: string) {

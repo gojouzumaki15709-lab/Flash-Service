@@ -11,6 +11,24 @@ function siteUrl(req: NextRequest) {
   return process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin;
 }
 
+// Messages d'erreur renvoyés par create_order_atomic (voir
+// supabase/migration_hardening.sql) traduits pour l'utilisateur.
+function errorMessageFor(code: string): { message: string; status: number } {
+  if (code === "VENDOR_CLOSED") return { message: "Ce vendeur est fermé.", status: 400 };
+  if (code === "PAYMENT_METHOD_NOT_FOUND") return { message: "Moyen de paiement introuvable.", status: 400 };
+  if (code === "PAYMENT_METHOD_INACTIVE") return { message: "Ce moyen de paiement n'est plus disponible.", status: 400 };
+  if (code === "DEBT_CANNOT_HAVE_PAYMENT_METHOD")
+    return { message: "Une commande à crédit ne peut pas avoir de moyen de paiement.", status: 400 };
+  if (code === "UNSUPPORTED_PAYMENT_METHOD")
+    return { message: "Moyen de paiement invalide : choisis liquide, Wave, ou paiement à crédit.", status: 400 };
+  if (code === "INVALID_QUANTITY") return { message: "Quantité invalide.", status: 400 };
+  if (code === "DEBT_LIMIT_EXCEEDED")
+    return { message: `Plafond de dette dépassé (max ${DEBT_LIMIT} FCFA). Rembourse avant d'emprunter à nouveau.`, status: 400 };
+  if (code === "EMPTY_ORDER") return { message: "Commande vide.", status: 400 };
+  if (code.startsWith("INSUFFICIENT_STOCK")) return { message: "Stock insuffisant pour un ou plusieurs produits.", status: 400 };
+  return { message: "Erreur lors de la création de la commande.", status: 500 };
+}
+
 // body: { vendorId, items: [{ productId, quantity }], paymentMethodId, isDebt }
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -23,179 +41,76 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Commande vide." }, { status: 400 });
   }
 
+  // Validation basique des entrées avant même d'appeler la DB.
+  const cleanItems: { product_id: string; quantity: number }[] = [];
+  for (const item of items) {
+    const productId = item?.productId;
+    const quantity = Number(item?.quantity);
+    if (typeof productId !== "string" || !productId) {
+      return NextResponse.json({ error: "Article invalide." }, { status: 400 });
+    }
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      return NextResponse.json({ error: "Quantité invalide." }, { status: 400 });
+    }
+    cleanItems.push({ product_id: productId, quantity });
+  }
+
   const db = supabaseAdmin();
 
-  // 1. Vérifier le vendeur est ouvert
-  const { data: vendor } = await db.from("vendors").select("is_open").eq("id", vendorId).single();
-  if (!vendor?.is_open) {
-    return NextResponse.json({ error: "Ce vendeur est fermé." }, { status: 400 });
+  // Toute la vérification (vendeur ouvert, stock, plafond de dette,
+  // type de paiement) et l'écriture (commande + lignes + décrément du
+  // stock + dette éventuelle) se font en UNE SEULE transaction
+  // PostgreSQL côté serveur. Voir create_order_atomic dans
+  // supabase/migration_hardening.sql — ceci remplace l'ancienne suite
+  // SELECT/UPDATE en JS qui était vulnérable aux races conditions et
+  // pouvait confirmer une commande sans paiement vérifié.
+  const { data: result, error: rpcError } = await db.rpc("create_order_atomic", {
+    p_client_id: session.id,
+    p_vendor_id: vendorId,
+    p_items: cleanItems,
+    p_payment_method_id: paymentMethodId || null,
+    p_is_debt: !!isDebt,
+    p_debt_limit: DEBT_LIMIT,
+  });
+
+  if (rpcError || !result) {
+    const code = (rpcError?.message || "").split(":")[0] || "UNKNOWN";
+    const { message, status } = errorMessageFor(code);
+    return NextResponse.json({ error: message }, { status });
   }
 
-  // 2. Charger le stock + prix pour chaque produit demandé et vérifier la disponibilité
-  const productIds = items.map((i: any) => i.productId);
-  const { data: stockRows } = await db
-    .from("vendor_stock")
-    .select("id, quantity, product_id, product:products(price, name)")
-    .eq("vendor_id", vendorId)
-    .in("product_id", productIds);
+  const orderId = result.order_id as string;
+  const status = result.status as string;
+  const paymentType = result.payment_type as string | null;
+  const apiKey = result.api_key as string | null;
+  const merchantLink = result.merchant_link as string | null;
 
-  let total = 0;
-  const orderItems: { product_id: string; quantity: number; unit_price: number }[] = [];
+  const isWaveApiMode = paymentType === "wave" && !!apiKey;
+  const isWaveLinkMode = paymentType === "wave" && !apiKey;
 
-  for (const item of items) {
-    const row = stockRows?.find((s) => s.product_id === item.productId);
-    const product = row?.product as unknown as { price: number; name: string } | undefined;
-    if (!row || !product || row.quantity < item.quantity) {
-      return NextResponse.json(
-        { error: `Stock insuffisant pour ${product?.name || "un produit"}.` },
-        { status: 400 }
-      );
-    }
-    total += product.price * item.quantity;
-    orderItems.push({ product_id: item.productId, quantity: item.quantity, unit_price: product.price });
-  }
-
-  // 3. Déterminer le type de paiement.
-  //    - cash : commande "pending" tant que le vendeur n'a pas confirmé quantité + somme reçue.
-  //    - wave : commande "pending" tant que Wave n'a pas confirmé le paiement via webhook.
-  //    - autre / dette : "confirmed" immédiatement.
-  let paymentType: string | null = null;
-  let wavePaymentMethod: {
-    id: string;
-    api_key_encrypted: string | null;
-    merchant_link: string | null;
-    is_active: boolean;
-  } | null = null;
-  if (paymentMethodId) {
-    const { data: pm } = await db
-      .from("payment_methods")
-      .select("id, type, api_key_encrypted, merchant_link, is_active")
-      .eq("id", paymentMethodId)
-      .single();
-    const pmData = pm as {
-      id: string;
-      type: string;
-      api_key_encrypted: string | null;
-      merchant_link: string | null;
-      is_active: boolean;
-    } | null;
-    paymentType = pmData?.type || null;
-    if (paymentType === "wave" && pmData) {
-      wavePaymentMethod = {
-        id: pmData.id,
-        api_key_encrypted: pmData.api_key_encrypted,
-        merchant_link: pmData.merchant_link,
-        is_active: pmData.is_active,
-      };
-    }
-  }
-  const isCash = paymentType === "cash";
-  const isWave = paymentType === "wave";
-  // Tant que la clé API Wave n'est pas configurée, on retombe automatiquement
-  // sur le mode "lien simple" : le client paie via le lien marchand statique,
-  // puis le vendeur confirme manuellement (comme pour le liquide).
-  const isWaveApiMode = isWave && !!wavePaymentMethod?.api_key_encrypted;
-  const isWaveLinkMode = isWave && !wavePaymentMethod?.api_key_encrypted;
-
-  if (isWave) {
-    if (!wavePaymentMethod?.is_active) {
-      return NextResponse.json({ error: "Le paiement Wave n'est pas disponible actuellement." }, { status: 400 });
-    }
-    if (isWaveLinkMode && !wavePaymentMethod.merchant_link) {
-      return NextResponse.json(
-        { error: "Le paiement Wave n'est pas encore configuré (aucun lien marchand). Contacte l'admin." },
-        { status: 400 }
-      );
-    }
-  }
-
-  // 4. Si paiement à crédit : vérifier le plafond de dette (1000, tous vendeurs confondus)
-  if (isDebt) {
-    const { data: debtView } = await db
-      .from("client_current_debt")
-      .select("total_debt")
-      .eq("client_id", session.id)
-      .maybeSingle();
-    const currentDebt = debtView?.total_debt || 0;
-    if (currentDebt + total > DEBT_LIMIT) {
-      return NextResponse.json(
-        {
-          error: `Plafond de dette dépassé (max ${DEBT_LIMIT} FCFA). Dette actuelle : ${currentDebt} FCFA. Rembourse avant d'emprunter à nouveau.`,
-        },
-        { status: 400 }
-      );
-    }
-  }
-
-  // 5. Créer la commande
-  //    - paiement liquide -> "pending" : le vendeur doit confirmer quantité prise + somme reçue
-  //    - wave -> "pending" : confirmée seulement quand Wave notifie le paiement via webhook
-  //    - dette / autre -> "confirmed" immédiatement (paiement déjà effectif)
-  const { data: order, error: orderError } = await db
-    .from("orders")
-    .insert({
-      client_id: session.id,
-      vendor_id: vendorId,
-      payment_method_id: paymentMethodId || null,
-      is_debt: !!isDebt,
-      total,
-      status: isCash || isWaveApiMode || isWaveLinkMode ? "pending" : "confirmed",
-    })
-    .select()
-    .single();
-
-  if (orderError || !order) {
-    return NextResponse.json({ error: "Erreur lors de la création de la commande." }, { status: 500 });
-  }
-
-  await db.from("order_items").insert(orderItems.map((i) => ({ ...i, order_id: order.id })));
-
-  // 6. Décrémenter le stock (réservé tout de suite, même pour le liquide en attente,
-  //    pour éviter qu'un autre client achète le même stock entre-temps)
-  for (const item of items) {
-    const row = stockRows?.find((s) => s.product_id === item.productId);
-    if (row) {
-      await db
-        .from("vendor_stock")
-        .update({ quantity: row.quantity - item.quantity, updated_at: new Date().toISOString() })
-        .eq("id", row.id);
-    }
-  }
-
-  // 7. Si dette, enregistrer
-  if (isDebt) {
-    await db.from("debts").insert({ client_id: session.id, order_id: order.id, amount: total });
-  }
-
-  // 8a. Mode API Wave (clé configurée) : créer une vraie session de paiement.
-  //     Si Wave échoue, on annule proprement la commande et on restitue le stock
-  //     (le client n'a encore rien payé à ce stade).
-  if (isWaveApiMode && wavePaymentMethod) {
+  if (isWaveApiMode) {
     const base = siteUrl(req);
     try {
       const waveSession = await createWaveCheckoutSession({
-        apiKey: wavePaymentMethod.api_key_encrypted!,
-        amount: total,
-        clientReference: order.id,
-        successUrl: `${base}/client?wave=success&order=${order.id}`,
-        errorUrl: `${base}/client?wave=error&order=${order.id}`,
+        apiKey: apiKey!,
+        amount: result.total,
+        clientReference: orderId,
+        successUrl: `${base}/client?wave=success&order=${orderId}`,
+        errorUrl: `${base}/client?wave=error&order=${orderId}`,
       });
 
-      await db.from("orders").update({ wave_checkout_id: waveSession.id }).eq("id", order.id);
+      await db.from("orders").update({ wave_checkout_id: waveSession.id }).eq("id", orderId);
 
-      return NextResponse.json({ ok: true, order, waveLaunchUrl: waveSession.wave_launch_url, waveMode: "api" });
+      return NextResponse.json({
+        ok: true,
+        order: { id: orderId, status, total: result.total },
+        waveLaunchUrl: waveSession.wave_launch_url,
+        waveMode: "api",
+      });
     } catch (err) {
-      // Rollback : on restitue le stock réservé et on annule la commande.
-      for (const item of items) {
-        const row = stockRows?.find((s) => s.product_id === item.productId);
-        if (row) {
-          await db
-            .from("vendor_stock")
-            .update({ quantity: row.quantity, updated_at: new Date().toISOString() })
-            .eq("id", row.id);
-        }
-      }
-      await db.from("orders").update({ status: "cancelled" }).eq("id", order.id);
+      // Rollback atomique : restitue le stock réservé et annule la commande
+      // (le client n'a encore rien payé à ce stade).
+      await db.rpc("cancel_pending_order_atomic", { p_order_id: orderId });
       const errorMessage = err instanceof Error ? err.message : "Erreur inconnue.";
       return NextResponse.json(
         { error: `Impossible de démarrer le paiement Wave : ${errorMessage}` },
@@ -204,17 +119,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 8b. Mode lien simple (pas de clé API configurée) : on renvoie juste le lien
-  //     marchand statique. Le client paie manuellement le montant exact via ce
-  //     lien, puis le vendeur confirme la réception du paiement (comme le liquide).
-  if (isWaveLinkMode && wavePaymentMethod) {
+  if (isWaveLinkMode) {
     return NextResponse.json({
       ok: true,
-      order,
-      waveLaunchUrl: wavePaymentMethod.merchant_link,
+      order: { id: orderId, status, total: result.total },
+      waveLaunchUrl: merchantLink,
       waveMode: "link",
     });
   }
 
-  return NextResponse.json({ ok: true, order });
+  return NextResponse.json({ ok: true, order: { id: orderId, status, total: result.total } });
 }

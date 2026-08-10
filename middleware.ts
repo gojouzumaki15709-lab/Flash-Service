@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
 function secretKey() {
-  return new TextEncoder().encode(process.env.SESSION_SECRET || "dev-secret");
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
+    // Pas de valeur de secours ici non plus : si SESSION_SECRET manque,
+    // on doit refuser l'accès plutôt que d'accepter un secret prévisible.
+    throw new Error("SESSION_SECRET is required (aucune valeur de secours autorisée).");
+  }
+  return new TextEncoder().encode(secret);
 }
 
 const ROLE_FOR_PATH: Record<string, string> = {

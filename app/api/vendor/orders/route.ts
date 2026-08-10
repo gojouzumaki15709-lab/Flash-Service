@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { getSession } from "@/lib/auth";
 
-// GET -> liste les commandes liquide en attente de confirmation pour le vendeur connecté
+// GET -> liste les commandes en attente de confirmation pour le vendeur connecté
 export async function GET() {
   const session = await getSession();
   if (!session || session.role !== "vendor") {
@@ -23,10 +23,26 @@ export async function GET() {
   return NextResponse.json({ orders: data });
 }
 
+function errorMessageFor(code: string): { message: string; status: number } {
+  if (code === "ORDER_NOT_FOUND") return { message: "Commande introuvable.", status: 404 };
+  if (code === "ORDER_NOT_PENDING") return { message: "Cette commande n'est plus en attente.", status: 400 };
+  if (code === "WAVE_API_ORDER_CANNOT_BE_MANUALLY_CONFIRMED")
+    return {
+      message: "Cette commande est payée via Wave (API) : elle ne peut être confirmée que par Wave, pas manuellement.",
+      status: 400,
+    };
+  if (code === "INSUFFICIENT_AMOUNT_RECEIVED")
+    return { message: "La somme reçue est inférieure au total de la commande.", status: 400 };
+  return { message: "Erreur lors de la confirmation.", status: 500 };
+}
+
 // PATCH body: { orderId, action: "confirm" | "reject", cashAmountReceived?, items?: [{ orderItemId, quantity }] }
 // - confirm : enregistre la quantité réellement remise (peut être <= quantité commandée) et la somme reçue.
 //             Si le client a finalement pris moins que commandé, la différence est restituée au stock.
 // - reject  : annule la commande et restitue tout le stock réservé.
+// Toute la logique (verrouillage de la commande, restitution du stock,
+// vérification du montant reçu, blocage des commandes Wave API) est
+// désormais atomique côté PostgreSQL — voir supabase/migration_hardening.sql.
 export async function PATCH(req: NextRequest) {
   const session = await getSession();
   if (!session || session.role !== "vendor") {
@@ -40,91 +56,44 @@ export async function PATCH(req: NextRequest) {
 
   const db = supabaseAdmin();
 
-  // Vérifier que la commande appartient bien à ce vendeur et est encore en attente
-  const { data: order } = await db
-    .from("orders")
-    .select("id, vendor_id, status")
-    .eq("id", orderId)
-    .single();
-
-  if (!order || order.vendor_id !== session.id) {
-    return NextResponse.json({ error: "Commande introuvable." }, { status: 404 });
-  }
-  if (order.status !== "pending") {
-    return NextResponse.json({ error: "Cette commande n'est plus en attente." }, { status: 400 });
-  }
-
-  const { data: orderItems } = await db
-    .from("order_items")
-    .select("id, product_id, quantity, unit_price")
-    .eq("order_id", orderId);
-
   if (action === "reject") {
-    // Restituer tout le stock réservé (lecture + écriture manuelle, comme dans le reste du code)
-    for (const item of orderItems || []) {
-      const { data: stockRow } = await db
-        .from("vendor_stock")
-        .select("id, quantity")
-        .eq("vendor_id", session.id)
-        .eq("product_id", item.product_id)
-        .maybeSingle();
-      if (stockRow) {
-        await db
-          .from("vendor_stock")
-          .update({ quantity: stockRow.quantity + item.quantity, updated_at: new Date().toISOString() })
-          .eq("id", stockRow.id);
-      }
+    const { error } = await db.rpc("reject_vendor_order_atomic", {
+      p_order_id: orderId,
+      p_vendor_id: session.id,
+    });
+    if (error) {
+      const code = (error.message || "").split(":")[0] || "UNKNOWN";
+      const { message, status } = errorMessageFor(code);
+      return NextResponse.json({ error: message }, { status });
     }
-
-    await db.from("orders").update({ status: "cancelled" }).eq("id", orderId);
     return NextResponse.json({ ok: true });
   }
 
   // action === "confirm"
-  const confirmedQuantities: Record<string, number> = {};
-  for (const it of items || []) {
-    confirmedQuantities[it.orderItemId] = Math.max(0, Number(it.quantity) || 0);
+  const cleanItems = Array.isArray(items)
+    ? items
+        .filter((it: any) => it?.orderItemId)
+        .map((it: any) => ({ order_item_id: it.orderItemId, quantity: Math.max(0, Number(it.quantity) || 0) }))
+    : [];
+
+  const amountReceived =
+    cashAmountReceived != null && cashAmountReceived !== "" ? Number(cashAmountReceived) : null;
+  if (amountReceived != null && (!Number.isFinite(amountReceived) || amountReceived < 0)) {
+    return NextResponse.json({ error: "Somme reçue invalide." }, { status: 400 });
   }
 
-  let newTotal = 0;
-  for (const item of orderItems || []) {
-    const confirmedQty = confirmedQuantities[item.id] ?? item.quantity;
-    const finalQty = Math.min(confirmedQty, item.quantity); // jamais plus que ce qui a été réservé
-    const diff = item.quantity - finalQty; // quantité non prise -> à restituer au stock
+  const { error } = await db.rpc("confirm_vendor_order_atomic", {
+    p_order_id: orderId,
+    p_vendor_id: session.id,
+    p_items: cleanItems,
+    p_cash_amount_received: amountReceived,
+  });
 
-    if (diff > 0) {
-      const { data: stockRow } = await db
-        .from("vendor_stock")
-        .select("id, quantity")
-        .eq("vendor_id", session.id)
-        .eq("product_id", item.product_id)
-        .maybeSingle();
-      if (stockRow) {
-        await db
-          .from("vendor_stock")
-          .update({ quantity: stockRow.quantity + diff, updated_at: new Date().toISOString() })
-          .eq("id", stockRow.id);
-      }
-    }
-
-    // On garde "quantity" intacte (ce qui a été commandé à l'origine, pour
-    // la traçabilité) et on enregistre séparément ce qui a été réellement remis.
-    await db.from("order_items").update({ quantity_taken: finalQty }).eq("id", item.id);
-
-    newTotal += finalQty * item.unit_price;
+  if (error) {
+    const code = (error.message || "").split(":")[0] || "UNKNOWN";
+    const { message, status } = errorMessageFor(code);
+    return NextResponse.json({ error: message }, { status });
   }
-
-  const amountReceived = cashAmountReceived != null && cashAmountReceived !== "" ? Number(cashAmountReceived) : newTotal;
-
-  await db
-    .from("orders")
-    .update({
-      status: "confirmed",
-      confirmed_by_vendor: true,
-      cash_amount_received: amountReceived,
-      total: newTotal,
-    })
-    .eq("id", orderId);
 
   return NextResponse.json({ ok: true });
 }

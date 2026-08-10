@@ -8,7 +8,7 @@ export async function GET() {
   // ne jamais renvoyer api_key_encrypted au client
   const { data, error } = await db
     .from("payment_methods")
-    .select("id, type, label, is_active, merchant_link, icon_url")
+    .select("id, type, label, is_active, merchant_link, icon_url, secret_rotated_at")
     .order("created_at");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ paymentMethods: data });
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       api_key_encrypted: encryptSecret(apiKey),
       config: webhookSecret ? { webhook_secret: encryptSecret(webhookSecret) } : {},
     })
-    .select("id, type, label, is_active, merchant_link, icon_url")
+    .select("id, type, label, is_active, merchant_link, icon_url, secret_rotated_at")
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, paymentMethod: data });

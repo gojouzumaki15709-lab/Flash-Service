@@ -1,0 +1,404 @@
+From d8f0f6c9b7ba7c8662bacb45b71c0f24b3e02cfa Mon Sep 17 00:00:00 2001
+From: Claude <dev@example.com>
+Date: Mon, 10 Aug 2026 22:40:29 +0000
+Subject: [PATCH] =?UTF-8?q?fix(wave):=20rotation=20tra=C3=A7able=20des=20s?=
+ =?UTF-8?q?ecrets=20+=20correction=20bug=20d'=C3=A9crasement=20config?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- supabase/migration_payment_secret_rotation.sql: ajoute payment_methods.secret_rotated_at
+- app/api/admin/payment-methods/[id]/route.ts:
+  - BUG corrigé: la mise à jour du webhook_secret écrasait tout le champ
+    config au lieu de le fusionner
+  - trace secret_rotated_at à chaque changement d'apiKey/webhookSecret
+- app/admin/page.tsx: badge de statut de rotation + formulaire pour tourner
+  les clés d'un moyen de paiement Wave existant (impossible avant, seule
+  la création permettait de saisir une clé)
+
+feat(auth): rate limiting sur /api/auth/login
+
+- supabase/migration_login_rate_limit.sql: table + fonction atomique
+  register_login_attempt_atomic() (verrou consultatif, cohérent avec le
+  reste du hardening) — un compteur en mémoire process ne protège rien
+  en serverless
+- app/api/auth/login/route.ts: limite par IP (20/15min) ET par identifiant
+  (5/15min), 429 + header Retry-After, fail-open si le rate limiter
+  lui-même est indisponible (log erreur, ne bloque pas tous les logins)
+---
+ app/admin/page.tsx                            | 70 +++++++++++++++++-
+ app/api/admin/payment-methods/[id]/route.ts   | 29 +++++++-
+ app/api/admin/payment-methods/route.ts        |  4 +-
+ app/api/auth/login/route.ts                   | 55 ++++++++++++++
+ supabase/migration_login_rate_limit.sql       | 73 +++++++++++++++++++
+ .../migration_payment_secret_rotation.sql     | 27 +++++++
+ 6 files changed, 253 insertions(+), 5 deletions(-)
+ create mode 100644 supabase/migration_login_rate_limit.sql
+ create mode 100644 supabase/migration_payment_secret_rotation.sql
+
+diff --git a/app/admin/page.tsx b/app/admin/page.tsx
+index 8bd5381..95c257f 100644
+--- a/app/admin/page.tsx
++++ b/app/admin/page.tsx
+@@ -380,6 +380,8 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
+ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
+   const [methods, setMethods] = useState<any[]>([]);
+   const [form, setForm] = useState({ type: "cash", label: "", merchantLink: "", iconUrl: "", apiKey: "", webhookSecret: "" });
++  const [rotateFormId, setRotateFormId] = useState<string | null>(null);
++  const [rotateValues, setRotateValues] = useState({ apiKey: "", webhookSecret: "" });
+ 
+   function load() {
+     fetch("/api/admin/payment-methods").then((r) => r.json()).then((d) => {
+@@ -415,6 +417,27 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
+     load();
+   }
+ 
++  // Rotation : remplace la clé API et/ou le secret webhook d'un moyen de
++  // paiement existant. Nécessaire après une fuite (ou simplement après le
++  // passage au chiffrement V3, pour les valeurs créées avant) : le
++  // chiffrement protège une clé au repos, il ne répare pas une clé déjà
++  // vue en clair par quelqu'un. Seule une vraie régénération côté Wave,
++  // suivie de sa saisie ici, referme la fenêtre d'exposition.
++  async function rotateSecrets(id: string) {
++    const body: Record<string, string> = {};
++    if (rotateValues.apiKey) body.apiKey = rotateValues.apiKey;
++    if (rotateValues.webhookSecret) body.webhookSecret = rotateValues.webhookSecret;
++    if (!Object.keys(body).length) return;
++    await fetch(`/api/admin/payment-methods/${id}`, {
++      method: "PATCH",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify(body),
++    });
++    setRotateValues({ apiKey: "", webhookSecret: "" });
++    setRotateFormId(null);
++    load();
++  }
++
+   return (
+     <div style={{ display: "grid", gap: 20 }}>
+       <form onSubmit={createMethod} className="card" style={{ display: "grid", gap: 10 }}>
+@@ -464,7 +487,8 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
+ 
+       <div style={{ display: "grid", gap: 10 }}>
+         {methods.map((m) => (
+-          <div key={m.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
++          <div key={m.id} className="card" style={{ display: "grid", gap: 10 }}>
++          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+               {m.icon_url ? (
+                 // eslint-disable-next-line @next/next/no-img-element
+@@ -482,9 +506,31 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
+               <div>
+                 <strong>{m.label}</strong> ({m.type})
+                 <div style={{ fontSize: 12, opacity: 0.6 }}>{m.is_active ? "Actif" : "Désactivé"}</div>
++                {m.type === "wave" && (
++                  <div style={{ fontSize: 11, marginTop: 2 }}>
++                    {m.secret_rotated_at ? (
++                      <span style={{ opacity: 0.6 }}>
++                        Clés tournées le {new Date(m.secret_rotated_at).toLocaleDateString("fr-FR")}
++                      </span>
++                    ) : (
++                      <span style={{ color: "#c0392b", fontWeight: 600 }}>
++                        ⚠ Jamais tournées depuis le passage au chiffrement
++                      </span>
++                    )}
++                  </div>
++                )}
+               </div>
+             </div>
+             <div style={{ display: "flex", gap: 6 }}>
++              {m.type === "wave" && (
++                <button
++                  className="btn"
++                  style={{ fontSize: 12, background: "#f1ede2", boxShadow: "none" }}
++                  onClick={() => setRotateFormId(rotateFormId === m.id ? null : m.id)}
++                >
++                  {rotateFormId === m.id ? "Fermer" : "Tourner les clés"}
++                </button>
++              )}
+               <button className="btn" style={{ fontSize: 12, background: "#f1ede2", boxShadow: "none" }} onClick={() => toggleActive(m.id, m.is_active)}>
+                 {m.is_active ? "Désactiver" : "Activer"}
+               </button>
+@@ -493,6 +539,28 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
+               </button>
+             </div>
+           </div>
++          {rotateFormId === m.id && (
++            <div style={{ display: "grid", gap: 8, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
++              <p style={{ fontSize: 12, opacity: 0.7 }}>
++                Régénère d'abord la clé côté Wave (Business Portal → Développeurs), puis colle la nouvelle
++                valeur ici. Laisse un champ vide pour ne pas le changer.
++              </p>
++              <input
++                placeholder="Nouvelle clé API Wave (wave_sn_prod_...)"
++                value={rotateValues.apiKey}
++                onChange={(e) => setRotateValues({ ...rotateValues, apiKey: e.target.value })}
++              />
++              <input
++                placeholder="Nouveau secret webhook (wave_sn_WHS_...)"
++                value={rotateValues.webhookSecret}
++                onChange={(e) => setRotateValues({ ...rotateValues, webhookSecret: e.target.value })}
++              />
++              <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => rotateSecrets(m.id)}>
++                Enregistrer la rotation
++              </button>
++            </div>
++          )}
++          </div>
+         ))}
+       </div>
+     </div>
+diff --git a/app/api/admin/payment-methods/[id]/route.ts b/app/api/admin/payment-methods/[id]/route.ts
+index 0ff4227..3913690 100644
+--- a/app/api/admin/payment-methods/[id]/route.ts
++++ b/app/api/admin/payment-methods/[id]/route.ts
+@@ -13,12 +13,37 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
+   if (!(await requireAdmin())) return NextResponse.json({ error: "Non autorisé." }, { status: 401 });
+   const { isActive, merchantLink, iconUrl, apiKey, webhookSecret } = await req.json();
+   const db = supabaseAdmin();
++
+   const update: Record<string, unknown> = {};
+   if (isActive !== undefined) update.is_active = isActive;
+   if (merchantLink !== undefined) update.merchant_link = merchantLink;
+   if (iconUrl !== undefined) update.icon_url = iconUrl;
+-  if (apiKey !== undefined) update.api_key_encrypted = encryptSecret(apiKey);
+-  if (webhookSecret !== undefined) update.config = { webhook_secret: encryptSecret(webhookSecret) };
++
++  // apiKey et webhookSecret sont un vrai changement de secret (rotation) :
++  // on trace la date pour pouvoir vérifier depuis l'admin que la rotation a
++  // bien eu lieu après une fuite, plutôt que de devoir aller lire la DB.
++  const isRotation = apiKey !== undefined || webhookSecret !== undefined;
++
++  if (apiKey !== undefined) {
++    update.api_key_encrypted = encryptSecret(apiKey);
++  }
++
++  if (webhookSecret !== undefined) {
++    // BUG corrigé : l'ancien code faisait `update.config = { webhook_secret: ... }`,
++    // ce qui écrasait silencieusement tout autre champ déjà présent dans
++    // `config`. On lit d'abord la valeur existante et on fusionne.
++    const { data: current, error: readError } = await db
++      .from("payment_methods")
++      .select("config")
++      .eq("id", params.id)
++      .maybeSingle();
++    if (readError) return NextResponse.json({ error: readError.message }, { status: 500 });
++    update.config = { ...(current?.config as Record<string, unknown> | null), webhook_secret: encryptSecret(webhookSecret) };
++  }
++
++  if (isRotation) {
++    update.secret_rotated_at = new Date().toISOString();
++  }
+ 
+   const { error } = await db.from("payment_methods").update(update).eq("id", params.id);
+   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+diff --git a/app/api/admin/payment-methods/route.ts b/app/api/admin/payment-methods/route.ts
+index 19a058b..fee3103 100644
+--- a/app/api/admin/payment-methods/route.ts
++++ b/app/api/admin/payment-methods/route.ts
+@@ -8,7 +8,7 @@ export async function GET() {
+   // ne jamais renvoyer api_key_encrypted au client
+   const { data, error } = await db
+     .from("payment_methods")
+-    .select("id, type, label, is_active, merchant_link, icon_url")
++    .select("id, type, label, is_active, merchant_link, icon_url, secret_rotated_at")
+     .order("created_at");
+   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+   return NextResponse.json({ paymentMethods: data });
+@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
+       api_key_encrypted: encryptSecret(apiKey),
+       config: webhookSecret ? { webhook_secret: encryptSecret(webhookSecret) } : {},
+     })
+-    .select("id, type, label, is_active, merchant_link, icon_url")
++    .select("id, type, label, is_active, merchant_link, icon_url, secret_rotated_at")
+     .single();
+   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+   return NextResponse.json({ ok: true, paymentMethod: data });
+diff --git a/app/api/auth/login/route.ts b/app/api/auth/login/route.ts
+index 8d331df..217330f 100644
+--- a/app/api/auth/login/route.ts
++++ b/app/api/auth/login/route.ts
+@@ -2,6 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
+ import { supabaseAdmin } from "@/lib/supabaseServer";
+ import { verifyPassword, createSession } from "@/lib/auth";
+ 
++// Fenêtres volontairement asymétriques : une IP peut légitimement héberger
++// plusieurs vendeurs/clients (même bâtiment, même réseau), donc sa limite
++// est plus large. Un identifiant précis, lui, ne devrait jamais avoir
++// besoin de plus de 5 tentatives en 15 minutes dans un usage normal.
++const IP_MAX_ATTEMPTS = 20;
++const IDENTIFIER_MAX_ATTEMPTS = 5;
++const WINDOW_SECONDS = 15 * 60;
++
++function clientIp(req: NextRequest): string {
++  // Sur Vercel (et la plupart des reverse proxies), l'IP réelle du client
++  // est dans x-forwarded-for (premier élément de la liste). NextRequest
++  // n'expose plus req.ip de façon fiable en App Router.
++  const forwarded = req.headers.get("x-forwarded-for");
++  if (forwarded) return forwarded.split(",")[0].trim();
++  return req.headers.get("x-real-ip") || "unknown";
++}
++
+ // body: { identifier: string, password: string }
+ // identifier = code (admin/vendeur) ou nom d'utilisateur (client).
+ // Le rôle n'est jamais demandé à l'utilisateur : on le déduit en cherchant
+@@ -16,6 +33,44 @@ export async function POST(req: NextRequest) {
+ 
+   const db = supabaseAdmin();
+ 
++  // Rate limiting : une tentative (réussie ou non) consomme un slot des
++  // deux compteurs. C'est volontairement strict — un utilisateur légitime
++  // qui se trompe 5 fois en 15 minutes devra patienter — car la protection
++  // contre le brute-force prime ici sur le confort en cas d'erreur de
++  // frappe répétée.
++  const ip = clientIp(req);
++  const identifierKey = String(identifier).trim().toLowerCase();
++
++  const { data: ipCheck, error: ipCheckError } = await db.rpc("register_login_attempt_atomic", {
++    p_bucket_key: `ip:${ip}`,
++    p_max_attempts: IP_MAX_ATTEMPTS,
++    p_window_seconds: WINDOW_SECONDS,
++  });
++  const { data: idCheck, error: idCheckError } = await db.rpc("register_login_attempt_atomic", {
++    p_bucket_key: `id:${identifierKey}`,
++    p_max_attempts: IDENTIFIER_MAX_ATTEMPTS,
++    p_window_seconds: WINDOW_SECONDS,
++  });
++
++  // Si le rate limiting lui-même échoue (DB indisponible, migration pas
++  // encore appliquée...), on choisit de laisser passer plutôt que de
++  // bloquer tous les logins de l'application à cause d'un problème
++  // secondaire — mais l'erreur est loguée pour ne pas passer inaperçue.
++  if (ipCheckError) console.error("[login] rate limit IP check failed:", ipCheckError.message);
++  if (idCheckError) console.error("[login] rate limit identifier check failed:", idCheckError.message);
++
++  const ipResult = ipCheck?.[0];
++  const idResult = idCheck?.[0];
++  const blocked = (ipResult && ipResult.allowed === false) || (idResult && idResult.allowed === false);
++
++  if (blocked) {
++    const retryAfter = Math.max(ipResult?.retry_after_seconds || 0, idResult?.retry_after_seconds || 0);
++    return NextResponse.json(
++      { error: "Trop de tentatives. Réessaie dans quelques minutes." },
++      { status: 429, headers: { "Retry-After": String(retryAfter) } }
++    );
++  }
++
+   // 1. Essayer admin
+   const { data: admin } = await db.from("admins").select("*").eq("code", identifier).maybeSingle();
+   if (admin && (await verifyPassword(password, admin.password_hash))) {
+diff --git a/supabase/migration_login_rate_limit.sql b/supabase/migration_login_rate_limit.sql
+new file mode 100644
+index 0000000..b84464c
+--- /dev/null
++++ b/supabase/migration_login_rate_limit.sql
+@@ -0,0 +1,73 @@
++-- ============================================================================
++-- migration_login_rate_limit.sql
++-- ----------------------------------------------------------------------------
++-- Corrige le point 🟠25 de l'audit : /api/auth/login n'a aucune limite de
++-- tentatives, donc un brute-force (identifiant + mot de passe) est possible
++-- sans aucun frein.
++--
++-- Implémentation en base plutôt qu'en mémoire process : sur Vercel/serverless,
++-- chaque invocation peut atterrir sur une instance différente, donc un
++-- compteur en mémoire (simple objet JS) ne protège quasiment rien en
++-- production. Une table + une fonction atomique (verrou consultatif, même
++-- pattern que le reste du hardening) donne une limite qui tient réellement.
++--
++-- Deux compteurs indépendants sont utilisés côté application :
++--   - par IP        (empêche un poste unique de bourriner toutes les portes)
++--   - par identifiant (empêche un attaquant distribué sur plusieurs IP de
++--                       cibler un seul compte)
++--
++-- Idempotent : peut être rejoué sans erreur.
++-- ============================================================================
++
++create table if not exists login_attempts (
++  id bigserial primary key,
++  bucket_key text not null,
++  attempted_at timestamptz not null default now()
++);
++
++create index if not exists idx_login_attempts_bucket_time
++  on login_attempts (bucket_key, attempted_at);
++
++-- Nettoyage best-effort : évite que la table grossisse indéfiniment. Appelé
++-- automatiquement à chaque vérification (voir la fonction ci-dessous), donc
++-- pas besoin de tâche cron dédiée pour un volume de trafic modeste.
++create or replace function register_login_attempt_atomic(
++  p_bucket_key text,
++  p_max_attempts int,
++  p_window_seconds int
++) returns table(allowed boolean, retry_after_seconds int)
++language plpgsql
++security definer
++as $$
++declare
++  v_count int;
++  v_oldest timestamptz;
++begin
++  -- Un seul appel à la fois par bucket : évite qu'une rafale de requêtes
++  -- concurrentes sur le même identifiant/IP contourne la limite en passant
++  -- toutes le check "count < max" avant qu'aucune n'ait encore inséré sa ligne.
++  perform pg_advisory_xact_lock(hashtext(p_bucket_key));
++
++  delete from login_attempts
++   where bucket_key = p_bucket_key
++     and attempted_at < now() - (p_window_seconds || ' seconds')::interval;
++
++  select count(*), min(attempted_at) into v_count, v_oldest
++    from login_attempts
++   where bucket_key = p_bucket_key;
++
++  if v_count >= p_max_attempts then
++    return query select
++      false,
++      greatest(1, p_window_seconds - extract(epoch from (now() - v_oldest))::int);
++    return;
++  end if;
++
++  insert into login_attempts (bucket_key) values (p_bucket_key);
++  return query select true, 0;
++end;
++$$;
++
++revoke execute on function register_login_attempt_atomic(text, int, int) from public, anon, authenticated;
++alter function register_login_attempt_atomic(text, int, int) set search_path = pg_catalog, public;
++-- grant execute on function register_login_attempt_atomic(text, int, int) to service_role; (déjà implicite)
+diff --git a/supabase/migration_payment_secret_rotation.sql b/supabase/migration_payment_secret_rotation.sql
+new file mode 100644
+index 0000000..1886fd0
+--- /dev/null
++++ b/supabase/migration_payment_secret_rotation.sql
+@@ -0,0 +1,27 @@
++-- ============================================================================
++-- migration_payment_secret_rotation.sql
++-- ----------------------------------------------------------------------------
++-- Corrige le point 🔴10 de l'audit : les secrets Wave (api_key_encrypted,
++-- config.webhook_secret) ont été stockés EN CLAIR jusqu'à V3. Le chiffrement
++-- AES-256-GCM protège désormais les nouvelles valeurs, mais les valeurs
++-- elles-mêmes (les clés Wave réelles) ont potentiellement fuité pendant
++-- cette période (logs, dumps DB, accès service_role...). Le chiffrement ne
++-- répare pas une clé déjà compromise : seule une vraie rotation (régénérer
++-- la clé côté Wave, puis la ressaisir ici) le fait.
++--
++-- Cette migration ajoute une colonne pour tracer QUAND une rotation a
++-- réellement eu lieu, pour que l'admin puisse vérifier depuis l'interface
++-- que chaque moyen de paiement a bien été tourné après le déploiement V3,
++-- plutôt que de devoir aller lire la base à la main.
++-- ============================================================================
++
++alter table payment_methods
++  add column if not exists secret_rotated_at timestamptz;
++
++comment on column payment_methods.secret_rotated_at is
++  'Date de la dernière rotation réelle de api_key_encrypted ou de
++   config.webhook_secret (mise à jour automatiquement par
++   app/api/admin/payment-methods/[id]/route.ts à chaque PATCH qui change
++   apiKey ou webhookSecret). NULL = jamais tourné depuis l''ajout de cette
++   colonne : à vérifier en priorité pour tout moyen de paiement créé avant
++   le passage au chiffrement (V3).';
+-- 
+2.43.0
+

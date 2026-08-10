@@ -380,6 +380,8 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
 function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
   const [methods, setMethods] = useState<any[]>([]);
   const [form, setForm] = useState({ type: "cash", label: "", merchantLink: "", iconUrl: "", apiKey: "", webhookSecret: "" });
+  const [rotateFormId, setRotateFormId] = useState<string | null>(null);
+  const [rotateValues, setRotateValues] = useState({ apiKey: "", webhookSecret: "" });
 
   function load() {
     fetch("/api/admin/payment-methods").then((r) => r.json()).then((d) => {
@@ -412,6 +414,27 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
 
   async function removeMethod(id: string) {
     await fetch(`/api/admin/payment-methods/${id}`, { method: "DELETE" });
+    load();
+  }
+
+  // Rotation : remplace la clé API et/ou le secret webhook d'un moyen de
+  // paiement existant. Nécessaire après une fuite (ou simplement après le
+  // passage au chiffrement V3, pour les valeurs créées avant) : le
+  // chiffrement protège une clé au repos, il ne répare pas une clé déjà
+  // vue en clair par quelqu'un. Seule une vraie régénération côté Wave,
+  // suivie de sa saisie ici, referme la fenêtre d'exposition.
+  async function rotateSecrets(id: string) {
+    const body: Record<string, string> = {};
+    if (rotateValues.apiKey) body.apiKey = rotateValues.apiKey;
+    if (rotateValues.webhookSecret) body.webhookSecret = rotateValues.webhookSecret;
+    if (!Object.keys(body).length) return;
+    await fetch(`/api/admin/payment-methods/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setRotateValues({ apiKey: "", webhookSecret: "" });
+    setRotateFormId(null);
     load();
   }
 
@@ -464,7 +487,8 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
 
       <div style={{ display: "grid", gap: 10 }}>
         {methods.map((m) => (
-          <div key={m.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div key={m.id} className="card" style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {m.icon_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -482,9 +506,31 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
               <div>
                 <strong>{m.label}</strong> ({m.type})
                 <div style={{ fontSize: 12, opacity: 0.6 }}>{m.is_active ? "Actif" : "Désactivé"}</div>
+                {m.type === "wave" && (
+                  <div style={{ fontSize: 11, marginTop: 2 }}>
+                    {m.secret_rotated_at ? (
+                      <span style={{ opacity: 0.6 }}>
+                        Clés tournées le {new Date(m.secret_rotated_at).toLocaleDateString("fr-FR")}
+                      </span>
+                    ) : (
+                      <span style={{ color: "#c0392b", fontWeight: 600 }}>
+                        ⚠ Jamais tournées depuis le passage au chiffrement
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
+              {m.type === "wave" && (
+                <button
+                  className="btn"
+                  style={{ fontSize: 12, background: "#f1ede2", boxShadow: "none" }}
+                  onClick={() => setRotateFormId(rotateFormId === m.id ? null : m.id)}
+                >
+                  {rotateFormId === m.id ? "Fermer" : "Tourner les clés"}
+                </button>
+              )}
               <button className="btn" style={{ fontSize: 12, background: "#f1ede2", boxShadow: "none" }} onClick={() => toggleActive(m.id, m.is_active)}>
                 {m.is_active ? "Désactiver" : "Activer"}
               </button>
@@ -492,6 +538,28 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
                 Supprimer
               </button>
             </div>
+          </div>
+          {rotateFormId === m.id && (
+            <div style={{ display: "grid", gap: 8, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+              <p style={{ fontSize: 12, opacity: 0.7 }}>
+                Régénère d'abord la clé côté Wave (Business Portal → Développeurs), puis colle la nouvelle
+                valeur ici. Laisse un champ vide pour ne pas le changer.
+              </p>
+              <input
+                placeholder="Nouvelle clé API Wave (wave_sn_prod_...)"
+                value={rotateValues.apiKey}
+                onChange={(e) => setRotateValues({ ...rotateValues, apiKey: e.target.value })}
+              />
+              <input
+                placeholder="Nouveau secret webhook (wave_sn_WHS_...)"
+                value={rotateValues.webhookSecret}
+                onChange={(e) => setRotateValues({ ...rotateValues, webhookSecret: e.target.value })}
+              />
+              <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => rotateSecrets(m.id)}>
+                Enregistrer la rotation
+              </button>
+            </div>
+          )}
           </div>
         ))}
       </div>

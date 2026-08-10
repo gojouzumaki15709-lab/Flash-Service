@@ -242,7 +242,11 @@ export default function VendorPage() {
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <h1 className="display" style={{ fontSize: 24, color: "var(--teal)" }}>Espace vendeur</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Flash Service" style={{ width: 40, height: 40, borderRadius: 10 }} />
+          <h1 className="display" style={{ fontSize: 20, color: "var(--teal)" }}>Espace vendeur</h1>
+        </div>
         <button className="btn" style={{ background: "#f1ede2", boxShadow: "none", fontSize: 13 }} onClick={logout}>
           Déconnexion
         </button>
@@ -487,8 +491,8 @@ export default function VendorPage() {
                     onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
                   />
                 ) : (
-                  <div style={{ width: 44, height: 44, borderRadius: 10, background: "#f1ede2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
-                    🍬
+                  <div style={{ width: 44, height: 44, borderRadius: 10, background: "#f1ede2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: "var(--teal)", flexShrink: 0 }}>
+                    {s.product.name.charAt(0).toUpperCase()}
                   </div>
                 )}
                 <div>

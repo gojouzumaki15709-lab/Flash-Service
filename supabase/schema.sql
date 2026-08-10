@@ -63,6 +63,7 @@ create table products (
   image_url text,
   price numeric(10,2) not null,       -- prix fixe, identique partout
   low_stock_threshold int not null default 2,  -- seuil d'alerte fixe
+  is_archived boolean not null default false,  -- "suppression" douce (préserve l'historique)
   created_at timestamptz not null default now()
 );
 

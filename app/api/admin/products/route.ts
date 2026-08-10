@@ -2,9 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { getSession } from "@/lib/auth";
 
-export async function GET() {
+// GET ?includeArchived=true -> renvoie aussi les produits archivés (utilisé par
+// l'onglet admin, qui doit pouvoir les afficher/restaurer). Par défaut (utilisé
+// par le catalogue client et le choix de produit du vendeur), on masque les
+// produits archivés.
+export async function GET(req: NextRequest) {
+  const includeArchived = req.nextUrl.searchParams.get("includeArchived") === "true";
   const db = supabaseAdmin();
-  const { data, error } = await db.from("products").select("*").order("name");
+  let query = db.from("products").select("*").order("name");
+  if (!includeArchived) query = query.eq("is_archived", false);
+  const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ products: data });
 }

@@ -30,7 +30,11 @@ export default function AdminPage() {
   return (
     <main style={{ maxWidth: 780, margin: "0 auto", padding: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <h1 className="display" style={{ fontSize: 24, color: "var(--teal)" }}>Administration</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Flash Service" style={{ width: 40, height: 40, borderRadius: 10 }} />
+          <h1 className="display" style={{ fontSize: 20, color: "var(--teal)" }}>Administration</h1>
+        </div>
         <button className="btn" style={{ background: "#f1ede2", boxShadow: "none", fontSize: 13 }} onClick={logout}>
           Déconnexion
         </button>
@@ -89,6 +93,7 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
   const [buildings, setBuildings] = useState<any[]>([]);
   const [form, setForm] = useState({ code: "", name: "", password: "", buildingId: "" });
   const [error, setError] = useState("");
+  const [expandedVendorId, setExpandedVendorId] = useState<string | null>(null);
 
   function load() {
     fetch("/api/admin/vendors").then((r) => r.json()).then((d) => {
@@ -138,19 +143,96 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
 
       <div style={{ display: "grid", gap: 10 }}>
         {vendors.map((v) => (
-          <div key={v.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <strong>{v.name}</strong> ({v.code})
-              <div style={{ fontSize: 13, opacity: 0.7 }}>
-                Bâtiment {v.building?.letter}{v.building?.number} — {v.is_open ? "Ouvert" : "Fermé"}
+          <div key={v.id} className="card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <strong>{v.name}</strong> ({v.code})
+                <div style={{ fontSize: 13, opacity: 0.7 }}>
+                  Bâtiment {v.building?.letter}{v.building?.number} — {v.is_open ? "Ouvert" : "Fermé"}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  className="btn"
+                  style={{ background: "#f1ede2", boxShadow: "none", fontSize: 12 }}
+                  onClick={() => setExpandedVendorId(expandedVendorId === v.id ? null : v.id)}
+                >
+                  {expandedVendorId === v.id ? "Fermer" : "Gérer le stock"}
+                </button>
+                <button className="btn" style={{ background: "#fbe4e0", color: "#c0392b", boxShadow: "none", fontSize: 12 }} onClick={() => removeVendor(v.id)}>
+                  Supprimer
+                </button>
               </div>
             </div>
-            <button className="btn" style={{ background: "#fbe4e0", color: "#c0392b", boxShadow: "none", fontSize: 12 }} onClick={() => removeVendor(v.id)}>
-              Supprimer
-            </button>
+            {expandedVendorId === v.id && <VendorStockManager vendorId={v.id} />}
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function VendorStockManager({ vendorId }: { vendorId: string }) {
+  const [stock, setStock] = useState<any[]>([]);
+  const [allProducts, setAllProducts] = useState<any[]>([]);
+  const [addProductId, setAddProductId] = useState("");
+  const [addQty, setAddQty] = useState(0);
+
+  function load() {
+    fetch(`/api/admin/vendor-stock?vendorId=${vendorId}`).then((r) => r.json()).then((d) => setStock(d.stock || []));
+    fetch("/api/admin/products").then((r) => r.json()).then((d) => setAllProducts(d.products || []));
+  }
+  useEffect(load, [vendorId]);
+
+  async function updateQuantity(productId: string, quantity: number) {
+    await fetch("/api/admin/vendor-stock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vendorId, productId, quantity }),
+    });
+    load();
+  }
+
+  async function addProduct() {
+    if (!addProductId) return;
+    await updateQuantity(addProductId, addQty);
+    setAddProductId("");
+    setAddQty(0);
+  }
+
+  const stockedIds = new Set(stock.map((s) => s.product.id));
+  const availableToAdd = allProducts.filter((p) => !stockedIds.has(p.id));
+
+  return (
+    <div style={{ borderTop: "1px solid var(--line)", marginTop: 12, paddingTop: 12, display: "grid", gap: 8 }}>
+      {stock.map((s) => (
+        <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14 }}>
+          <span>{s.product.name} <span style={{ opacity: 0.6 }}>({s.product.price} FCFA)</span></span>
+          <input
+            type="number"
+            min={0}
+            value={s.quantity}
+            onChange={(e) => updateQuantity(s.product.id, Number(e.target.value))}
+            style={{ width: 70, textAlign: "center" }}
+          />
+        </div>
+      ))}
+      {!stock.length && <p style={{ opacity: 0.6, fontSize: 13 }}>Ce vendeur n'a encore aucun produit en stock.</p>}
+
+      {!!availableToAdd.length && (
+        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+          <select value={addProductId} onChange={(e) => setAddProductId(e.target.value)} style={{ flex: 1 }}>
+            <option value="">— Ajouter un produit —</option>
+            {availableToAdd.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <input type="number" min={0} value={addQty} onChange={(e) => setAddQty(Number(e.target.value))} style={{ width: 70 }} />
+          <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={addProduct}>
+            Ajouter
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -160,10 +242,10 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
   const [form, setForm] = useState({ name: "", price: "", imageUrl: "", lowStockThreshold: "2" });
 
   function load() {
-    fetch("/api/admin/products").then((r) => r.json()).then((d) => {
+    fetch("/api/admin/products?includeArchived=true").then((r) => r.json()).then((d) => {
       const list = d.products || [];
       setProducts(list);
-      onCount(list.length);
+      onCount(list.filter((p: any) => !p.is_archived).length);
     });
   }
   useEffect(load, []);
@@ -181,6 +263,20 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
       }),
     });
     setForm({ name: "", price: "", imageUrl: "", lowStockThreshold: "2" });
+    load();
+  }
+
+  async function archiveProduct(id: string) {
+    await fetch(`/api/admin/products/${id}`, { method: "DELETE" });
+    load();
+  }
+
+  async function restoreProduct(id: string) {
+    await fetch(`/api/admin/products/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isArchived: false }),
+    });
     load();
   }
 
@@ -206,7 +302,7 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
 
       <div style={{ display: "grid", gap: 10 }}>
         {products.map((p) => (
-          <div key={p.id} className="card" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div key={p.id} className="card" style={{ display: "flex", alignItems: "center", gap: 12, opacity: p.is_archived ? 0.55 : 1 }}>
             {p.image_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -225,17 +321,31 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: 20,
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: "var(--teal)",
                   flexShrink: 0,
                 }}
               >
-                🍬
+                {p.name.charAt(0).toUpperCase()}
               </div>
             )}
-            <div>
+            <div style={{ flex: 1 }}>
               <strong>{p.name}</strong> — {p.price} FCFA
+              {p.is_archived && (
+                <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "#c0392b" }}>Archivé (masqué)</span>
+              )}
               <div style={{ fontSize: 12, opacity: 0.6 }}>Seuil d'alerte : {p.low_stock_threshold}</div>
             </div>
+            {p.is_archived ? (
+              <button className="btn" style={{ fontSize: 12, background: "#e5f5ef", color: "var(--teal)", boxShadow: "none" }} onClick={() => restoreProduct(p.id)}>
+                Restaurer
+              </button>
+            ) : (
+              <button className="btn" style={{ fontSize: 12, background: "#fbe4e0", color: "#c0392b", boxShadow: "none" }} onClick={() => archiveProduct(p.id)}>
+                Supprimer
+              </button>
+            )}
           </div>
         ))}
       </div>

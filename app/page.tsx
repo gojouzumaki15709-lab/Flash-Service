@@ -76,9 +76,12 @@ export default function Home() {
       }}
     >
       <div style={{ textAlign: "center", marginBottom: 28 }}>
-        <div className="display" style={{ fontSize: 34, color: "var(--teal)", lineHeight: 1 }}>
-          🍬 Flash Service
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo.png"
+          alt="Flash Service"
+          style={{ width: 108, height: 108, borderRadius: 24, marginBottom: 8 }}
+        />
         <p style={{ color: "var(--ink)", opacity: 0.7, marginTop: 6 }}>
           Trouve un vendeur ouvert dans ton bâtiment
         </p>

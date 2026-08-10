@@ -41,6 +41,10 @@ export default function ClientPage() {
   const [message, setMessage] = useState("");
   const [debtTotal, setDebtTotal] = useState(0);
   const [debts, setDebts] = useState<Debt[]>([]);
+  const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set());
+  const [pendingRepaymentDebtIds, setPendingRepaymentDebtIds] = useState<Set<string>>(new Set());
+  const [repayMethodId, setRepayMethodId] = useState("");
+  const [repayMessage, setRepayMessage] = useState("");
   const [orderHistory, setOrderHistory] = useState<OrderHistory[]>([]);
   const [totalSpent, setTotalSpent] = useState(0);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -50,6 +54,51 @@ export default function ClientPage() {
     const data = await res.json();
     setDebtTotal(data.total || 0);
     setDebts(data.debts || []);
+    setPendingRepaymentDebtIds(new Set<string>(data.pendingDebtIds || []));
+    setSelectedDebtIds((prev) => {
+      const next = new Set(prev);
+      for (const id of data.pendingDebtIds || []) next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleDebtSelection(debtId: string) {
+    setSelectedDebtIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(debtId)) next.delete(debtId);
+      else next.add(debtId);
+      return next;
+    });
+  }
+
+  const selectedDebtsTotal = debts
+    .filter((d) => selectedDebtIds.has(d.id))
+    .reduce((sum, d) => sum + Number(d.amount), 0);
+
+  async function submitRepayment() {
+    setRepayMessage("");
+    const res = await fetch("/api/client/debts/repay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        debtIds: Array.from(selectedDebtIds),
+        paymentMethodId: repayMethodId || null,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setRepayMessage(data.error);
+      return;
+    }
+    if (data.waveLaunchUrl) {
+      window.open(data.waveLaunchUrl, "_blank");
+      setRepayMessage(`Paie exactement ${selectedDebtsTotal} FCFA via Wave (nouvel onglet), un vendeur confirmera dès réception.`);
+    } else {
+      setRepayMessage("Enregistré : un vendeur confirmera dès réception du paiement en liquide.");
+    }
+    setSelectedDebtIds(new Set());
+    setRepayMethodId("");
+    loadDebts();
   }
 
   async function loadHistory() {
@@ -254,16 +303,69 @@ export default function ClientPage() {
                   <p style={{ fontWeight: 700, marginBottom: 6 }}>
                     Dette actuelle : {debtTotal} FCFA <span style={{ fontWeight: 400, opacity: 0.7 }}>(plafond 1000 FCFA)</span>
                   </p>
-                  <div style={{ display: "grid", gap: 4 }}>
-                    {debts.map((d) => (
-                      <div key={d.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, opacity: 0.8 }}>
-                        <span>{d.order?.vendor?.name || "Vendeur"} — {new Date(d.created_at).toLocaleDateString("fr-FR")}</span>
-                        <span>{d.amount} FCFA</span>
-                      </div>
-                    ))}
+                  <div style={{ display: "grid", gap: 4, marginBottom: 10 }}>
+                    {debts.map((d) => {
+                      const pending = pendingRepaymentDebtIds.has(d.id);
+                      return (
+                        <label
+                          key={d.id}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            fontSize: 13,
+                            opacity: pending ? 0.5 : 0.9,
+                            gap: 8,
+                          }}
+                        >
+                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <input
+                              type="checkbox"
+                              disabled={pending}
+                              checked={selectedDebtIds.has(d.id)}
+                              onChange={() => toggleDebtSelection(d.id)}
+                            />
+                            {d.order?.vendor?.name || "Vendeur"} — {new Date(d.created_at).toLocaleDateString("fr-FR")}
+                            {pending && <span style={{ fontSize: 11, opacity: 0.8 }}> (remboursement en attente)</span>}
+                          </span>
+                          <span>{d.amount} FCFA</span>
+                        </label>
+                      );
+                    })}
                   </div>
-                  <p style={{ fontSize: 12, opacity: 0.6, marginTop: 8 }}>
-                    Pour rembourser, paie en liquide chez n&apos;importe quel vendeur : il enregistrera le remboursement dans l&apos;appli.
+
+                  {selectedDebtIds.size > 0 && (
+                    <div style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+                        Rembourser {selectedDebtsTotal} FCFA sélectionné(s)
+                      </p>
+                      <select
+                        value={repayMethodId}
+                        onChange={(e) => setRepayMethodId(e.target.value)}
+                        style={{ marginBottom: 8 }}
+                      >
+                        <option value="">Je paierai en liquide chez un vendeur</option>
+                        {paymentMethods
+                          .filter((p) => p.type === "wave")
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.label} (paiement en ligne)
+                            </option>
+                          ))}
+                      </select>
+                      {repayMessage && (
+                        <p style={{ color: repayMessage.includes("succès") || repayMessage.includes("enregistr") ? "var(--teal)" : "#c0392b", fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+                          {repayMessage}
+                        </p>
+                      )}
+                      <button className="btn btn-primary" style={{ width: "100%" }} onClick={submitRepayment}>
+                        {repayMethodId ? "Payer via Wave" : "Enregistrer (je paierai en liquide)"}
+                      </button>
+                    </div>
+                  )}
+
+                  <p style={{ fontSize: 12, opacity: 0.6, marginTop: 10 }}>
+                    Choix "liquide" : un vendeur confirmera dès réception du paiement en personne. Choix Wave : paie le montant exact via le lien, un vendeur confirmera dès réception.
                   </p>
                 </div>
               )}

@@ -27,6 +27,13 @@ type PendingOrder = {
 
 type DebtEntry = { id: string; amount: number; created_at: string };
 type DebtClient = { id: string; name: string; phone: string };
+type PendingRepayment = {
+  id: string;
+  amount: number;
+  created_at: string;
+  client: { name: string; phone: string };
+  payment_method: { type: string; label: string } | null;
+};
 
 export default function VendorPage() {
   const router = useRouter();
@@ -47,6 +54,32 @@ export default function VendorPage() {
   const [selectedDebtIds, setSelectedDebtIds] = useState<Record<string, boolean>>({});
   const [debtCash, setDebtCash] = useState("");
   const [debtMessage, setDebtMessage] = useState("");
+
+  const [pendingRepayments, setPendingRepayments] = useState<PendingRepayment[]>([]);
+  const [repaymentCash, setRepaymentCash] = useState<Record<string, string>>({});
+  const [repaymentMessage, setRepaymentMessage] = useState<Record<string, string>>({});
+
+  async function loadPendingRepayments() {
+    const res = await fetch("/api/vendor/debt-repayments");
+    const data = await res.json();
+    setPendingRepayments(data.repayments || []);
+  }
+
+  async function handleRepayment(r: PendingRepayment, action: "confirm" | "reject") {
+    setRepaymentMessage((prev) => ({ ...prev, [r.id]: "" }));
+    const cashAmountReceived = repaymentCash[r.id] !== "" ? Number(repaymentCash[r.id]) : r.amount;
+    const res = await fetch("/api/vendor/debt-repayments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repaymentId: r.id, action, cashAmountReceived }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setRepaymentMessage((prev) => ({ ...prev, [r.id]: data.error }));
+      return;
+    }
+    loadPendingRepayments();
+  }
 
   async function loadStock() {
     const res = await fetch("/api/vendor/stock");
@@ -81,6 +114,7 @@ export default function VendorPage() {
   useEffect(() => {
     loadStock();
     loadPendingOrders();
+    loadPendingRepayments();
     fetch("/api/admin/products").then((r) => r.json()).then((d) => setAllProducts(d.products || []));
   }, []);
 
@@ -321,7 +355,64 @@ export default function VendorPage() {
         {!pendingOrders.length && <p style={{ opacity: 0.6, fontSize: 14 }}>Aucune commande en attente.</p>}
       </div>
 
-      <h2 style={{ fontSize: 16, marginBottom: 10 }}>Remboursement de dette</h2>
+      <h2 style={{ fontSize: 16, marginBottom: 10 }}>
+        Demandes de remboursement en attente
+        {!!pendingRepayments.length && (
+          <span className="badge badge-warning" style={{ marginLeft: 8 }}>
+            {pendingRepayments.length}
+          </span>
+        )}
+      </h2>
+      <div style={{ display: "grid", gap: 12, marginBottom: 24 }}>
+        {pendingRepayments.map((r) => (
+          <div key={r.id} className="card" style={{ borderColor: "#e59a3d" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <strong>{r.client?.name}</strong>
+              <span style={{ fontSize: 13, opacity: 0.7 }}>{r.client?.phone}</span>
+            </div>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "3px 8px",
+                borderRadius: 999,
+                background: r.payment_method?.type === "wave" ? "#e6f0ff" : "#fff3e0",
+                color: r.payment_method?.type === "wave" ? "#1d4ed8" : "#b7791f",
+              }}
+            >
+              {r.payment_method?.label || "Liquide"}
+            </span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "10px 0" }}>
+              <span style={{ fontSize: 13, opacity: 0.7 }}>Montant attendu : {r.amount} FCFA</span>
+              <div>
+                <label style={{ fontSize: 12, opacity: 0.7, marginRight: 4 }}>Somme reçue :</label>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder={String(r.amount)}
+                  value={repaymentCash[r.id] ?? ""}
+                  onChange={(e) => setRepaymentCash((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                  style={{ width: 90, textAlign: "center" }}
+                />
+              </div>
+            </div>
+            {repaymentMessage[r.id] && (
+              <p style={{ color: "#c0392b", fontWeight: 600, marginBottom: 8, fontSize: 13 }}>{repaymentMessage[r.id]}</p>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => handleRepayment(r, "confirm")}>
+                Confirmer
+              </button>
+              <button className="btn" style={{ background: "#f1ede2", boxShadow: "none" }} onClick={() => handleRepayment(r, "reject")}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        ))}
+        {!pendingRepayments.length && <p style={{ opacity: 0.6, fontSize: 14 }}>Aucune demande en attente.</p>}
+      </div>
+
+      <h2 style={{ fontSize: 16, marginBottom: 10 }}>Rechercher un remboursement manuellement</h2>
       <div className="card" style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <input

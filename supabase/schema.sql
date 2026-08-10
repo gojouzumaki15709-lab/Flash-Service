@@ -137,6 +137,22 @@ create table debts (
 );
 
 -- ------------------------------------------------------------
+-- 11. REMBOURSEMENTS DE DETTE (initiés par le client, confirmés par un vendeur)
+-- ------------------------------------------------------------
+create table debt_repayments (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references clients(id),
+  debt_ids uuid[] not null,
+  amount numeric(10,2) not null,
+  payment_method_id uuid references payment_methods(id),
+  status text not null default 'pending',   -- pending | confirmed | cancelled
+  confirmed_by_vendor_id uuid references vendors(id),
+  cash_amount_received numeric(10,2),
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz
+);
+
+-- ------------------------------------------------------------
 -- VUE UTILE : dette totale actuelle d'un client (non remboursée)
 -- ------------------------------------------------------------
 create view client_current_debt as
@@ -180,6 +196,7 @@ alter table payment_methods enable row level security;
 alter table orders enable row level security;
 alter table order_items enable row level security;
 alter table debts enable row level security;
+alter table debt_repayments enable row level security;
 alter table wave_webhook_events enable row level security;
 
 -- ------------------------------------------------------------

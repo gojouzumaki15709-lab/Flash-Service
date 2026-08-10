@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { verifyWaveWebhookSignature } from "@/lib/wave";
+import { decryptSecret } from "@/lib/crypto";
 
 // IMPORTANT : on utilise req.text() pour récupérer le corps BRUT (non parsé),
 // indispensable pour que la vérification de signature HMAC fonctionne
@@ -48,7 +49,9 @@ export async function POST(req: NextRequest) {
     .eq("id", order.payment_method_id)
     .maybeSingle();
 
-  const webhookSecret = (paymentMethod?.config as any)?.webhook_secret as string | undefined;
+  const webhookSecret = decryptSecret(
+    (paymentMethod?.config as any)?.webhook_secret as string | undefined
+  ) ?? undefined;
 
   if (!webhookSecret || !verifyWaveWebhookSignature(rawBody, signatureHeader, webhookSecret)) {
     return NextResponse.json({ error: "Signature invalide." }, { status: 401 });

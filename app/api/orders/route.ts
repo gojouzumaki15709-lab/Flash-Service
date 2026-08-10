@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { getSession } from "@/lib/auth";
 import { createWaveCheckoutSession } from "@/lib/wave";
+import { decryptSecret } from "@/lib/crypto";
 
 const DEBT_LIMIT = 1000;
 
@@ -82,7 +83,10 @@ export async function POST(req: NextRequest) {
   const orderId = result.order_id as string;
   const status = result.status as string;
   const paymentType = result.payment_type as string | null;
-  const apiKey = result.api_key as string | null;
+  // create_order_atomic() renvoie la valeur brute de payment_methods.api_key_encrypted
+  // (chiffrée depuis la migration crypto). On la déchiffre ici, côté serveur
+  // uniquement — elle n'est jamais renvoyée telle quelle au client.
+  const apiKey = decryptSecret(result.api_key as string | null);
   const merchantLink = result.merchant_link as string | null;
 
   const isWaveApiMode = paymentType === "wave" && !!apiKey;

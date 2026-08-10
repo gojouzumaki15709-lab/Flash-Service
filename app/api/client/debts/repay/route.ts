@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { getSession } from "@/lib/auth";
+import { decryptSecret } from "@/lib/crypto";
 
 function siteUrl(req: NextRequest) {
   return process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin;
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
     if (pm) {
       paymentType = pm.type;
       merchantLink = pm.merchant_link;
-      apiKey = pm.api_key_encrypted;
+      apiKey = decryptSecret(pm.api_key_encrypted);
       isActive = pm.is_active;
     }
     if (!isActive) {

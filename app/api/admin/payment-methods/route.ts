@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { getSession } from "@/lib/auth";
+import { encryptSecret } from "@/lib/crypto";
 
 export async function GET() {
   const db = supabaseAdmin();
@@ -31,8 +32,8 @@ export async function POST(req: NextRequest) {
       label,
       merchant_link: merchantLink || null,
       icon_url: iconUrl || null,
-      api_key_encrypted: apiKey || null, // TODO: chiffrer avant stockage en production
-      config: webhookSecret ? { webhook_secret: webhookSecret } : {},
+      api_key_encrypted: encryptSecret(apiKey),
+      config: webhookSecret ? { webhook_secret: encryptSecret(webhookSecret) } : {},
     })
     .select("id, type, label, is_active, merchant_link, icon_url")
     .single();

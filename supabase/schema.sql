@@ -88,6 +88,7 @@ create table payment_methods (
   label text not null,                -- nom affiché, ex: "Wave"
   is_active boolean not null default true,
   merchant_link text,                 -- lien marchand (wave.com/pay/xxx)
+  icon_url text,                      -- logo/icône affiché au client (ex: logo Wave)
   api_key_encrypted text,             -- clé API (jamais exposée au client)
   config jsonb default '{}'::jsonb,   -- config additionnelle libre
   created_at timestamptz not null default now()

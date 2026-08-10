@@ -191,15 +191,51 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
         <input placeholder="Nom (ex: Coca-Cola)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
         <input type="number" placeholder="Prix (FCFA)" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required />
         <input placeholder="URL image (optionnel)" value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} />
+        {form.imageUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={form.imageUrl}
+            alt="Aperçu"
+            style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 12, border: "1px solid var(--line)" }}
+            onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+          />
+        )}
         <input type="number" placeholder="Seuil d'alerte stock bas" value={form.lowStockThreshold} onChange={(e) => setForm({ ...form, lowStockThreshold: e.target.value })} />
         <button className="btn btn-primary" type="submit">Ajouter</button>
       </form>
 
       <div style={{ display: "grid", gap: 10 }}>
         {products.map((p) => (
-          <div key={p.id} className="card">
-            <strong>{p.name}</strong> — {p.price} FCFA
-            <div style={{ fontSize: 12, opacity: 0.6 }}>Seuil d'alerte : {p.low_stock_threshold}</div>
+          <div key={p.id} className="card" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {p.image_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={p.image_url}
+                alt={p.name}
+                style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 10, flexShrink: 0 }}
+                onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+              />
+            ) : (
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 10,
+                  background: "#f1ede2",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 20,
+                  flexShrink: 0,
+                }}
+              >
+                🍬
+              </div>
+            )}
+            <div>
+              <strong>{p.name}</strong> — {p.price} FCFA
+              <div style={{ fontSize: 12, opacity: 0.6 }}>Seuil d'alerte : {p.low_stock_threshold}</div>
+            </div>
           </div>
         ))}
       </div>
@@ -209,7 +245,7 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
 
 function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
   const [methods, setMethods] = useState<any[]>([]);
-  const [form, setForm] = useState({ type: "cash", label: "", merchantLink: "", apiKey: "", webhookSecret: "" });
+  const [form, setForm] = useState({ type: "cash", label: "", merchantLink: "", iconUrl: "", apiKey: "", webhookSecret: "" });
 
   function load() {
     fetch("/api/admin/payment-methods").then((r) => r.json()).then((d) => {
@@ -227,7 +263,7 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
-    setForm({ type: "cash", label: "", merchantLink: "", apiKey: "", webhookSecret: "" });
+    setForm({ type: "cash", label: "", merchantLink: "", iconUrl: "", apiKey: "", webhookSecret: "" });
     load();
   }
 
@@ -257,6 +293,16 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
         </select>
         <input placeholder="Nom affiché (ex: Wave)" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} required />
         <input placeholder="Lien marchand (optionnel)" value={form.merchantLink} onChange={(e) => setForm({ ...form, merchantLink: e.target.value })} />
+        <input placeholder="URL du logo (optionnel, ex: logo Wave)" value={form.iconUrl} onChange={(e) => setForm({ ...form, iconUrl: e.target.value })} />
+        {form.iconUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={form.iconUrl}
+            alt="Aperçu du logo"
+            style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 10, border: "1px solid var(--line)", background: "#fff", padding: 4 }}
+            onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+          />
+        )}
         {form.type === "wave" ? (
           <>
             <input
@@ -285,9 +331,24 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
       <div style={{ display: "grid", gap: 10 }}>
         {methods.map((m) => (
           <div key={m.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <strong>{m.label}</strong> ({m.type})
-              <div style={{ fontSize: 12, opacity: 0.6 }}>{m.is_active ? "Actif" : "Désactivé"}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {m.icon_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={m.icon_url}
+                  alt={m.label}
+                  style={{ width: 36, height: 36, objectFit: "contain", borderRadius: 8, background: "#fff", border: "1px solid var(--line)", padding: 3, flexShrink: 0 }}
+                  onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+                />
+              ) : (
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: "#f1ede2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
+                  💳
+                </div>
+              )}
+              <div>
+                <strong>{m.label}</strong> ({m.type})
+                <div style={{ fontSize: 12, opacity: 0.6 }}>{m.is_active ? "Actif" : "Désactivé"}</div>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button className="btn" style={{ fontSize: 12, background: "#f1ede2", boxShadow: "none" }} onClick={() => toggleActive(m.id, m.is_active)}>

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 type Vendor = { id: string; name: string; is_open: boolean; building: { letter: string; number: number } };
 type StockItem = { id: string; quantity: number; product: { id: string; name: string; image_url: string | null; price: number } };
-type PaymentMethod = { id: string; type: string; label: string; is_active: boolean };
+type PaymentMethod = { id: string; type: string; label: string; is_active: boolean; icon_url: string | null };
 type Debt = { id: string; amount: number; created_at: string; order: { vendor: { name: string } } | null };
 
 type OrderHistoryItem = { quantity: number; quantity_taken: number | null; unit_price: number; product: { name: string } };
@@ -421,10 +421,37 @@ export default function ClientPage() {
           <div style={{ display: "grid", gap: 10, marginBottom: 20 }}>
             {stock.map((s) => (
               <div key={s.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <strong>{s.product.name}</strong>
-                  <div style={{ fontSize: 13, opacity: 0.7 }}>
-                    {s.product.price} FCFA — en stock : {s.quantity}
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  {s.product.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={s.product.image_url}
+                      alt={s.product.name}
+                      style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 12, flexShrink: 0 }}
+                      onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: 52,
+                        height: 52,
+                        borderRadius: 12,
+                        background: "#f1ede2",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 22,
+                        flexShrink: 0,
+                      }}
+                    >
+                      🍬
+                    </div>
+                  )}
+                  <div>
+                    <strong>{s.product.name}</strong>
+                    <div style={{ fontSize: 13, opacity: 0.7 }}>
+                      {s.product.price} FCFA — en stock : {s.quantity}
+                    </div>
                   </div>
                 </div>
                 <input
@@ -444,25 +471,72 @@ export default function ClientPage() {
             <p style={{ fontWeight: 700, marginBottom: 10 }}>Total : {total} FCFA</p>
 
             <label className="label">Mode de paiement</label>
-            <select
-              value={isDebt ? "debt" : paymentMethodId}
-              onChange={(e) => {
-                if (e.target.value === "debt") {
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))", gap: 8, margin: "8px 0 14px" }}>
+              {paymentMethods.map((p) => {
+                const selected = !isDebt && paymentMethodId === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      setIsDebt(false);
+                      setPaymentMethodId(p.id);
+                    }}
+                    className="card"
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "10px 6px",
+                      cursor: "pointer",
+                      border: selected ? "2px solid var(--teal)" : "1px solid var(--line)",
+                      background: selected ? "#e5f5ef" : "#fff",
+                    }}
+                  >
+                    {p.icon_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.icon_url}
+                        alt={p.label}
+                        style={{ width: 32, height: 32, objectFit: "contain" }}
+                        onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+                      />
+                    ) : (
+                      <span style={{ fontSize: 22 }}>💳</span>
+                    )}
+                    <span style={{ fontSize: 11, fontWeight: 700, textAlign: "center" }}>{p.label}</span>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => {
                   setIsDebt(true);
                   setPaymentMethodId("");
-                } else {
-                  setIsDebt(false);
-                  setPaymentMethodId(e.target.value);
-                }
-              }}
-              style={{ marginBottom: 12 }}
-            >
-              <option value="">— Choisir —</option>
-              {paymentMethods.map((p) => (
-                <option key={p.id} value={p.id}>{p.label}</option>
-              ))}
-              <option value="debt">Dette (à rembourser, plafond 1000 FCFA — reste {Math.max(0, 1000 - debtTotal)} FCFA disponible)</option>
-            </select>
+                }}
+                className="card"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "10px 6px",
+                  cursor: "pointer",
+                  border: isDebt ? "2px solid var(--mango-dark)" : "1px solid var(--line)",
+                  background: isDebt ? "#fff1e6" : "#fff",
+                }}
+              >
+                <span style={{ fontSize: 22 }}>🕒</span>
+                <span style={{ fontSize: 11, fontWeight: 700, textAlign: "center" }}>Dette</span>
+              </button>
+            </div>
+
+            {isDebt && (
+              <p style={{ fontSize: 12, opacity: 0.7, marginTop: -8, marginBottom: 12 }}>
+                Plafond 1000 FCFA — reste {Math.max(0, 1000 - debtTotal)} FCFA disponible.
+              </p>
+            )}
 
             {message && <p style={{ color: message.includes("succès") ? "var(--teal)" : "#c0392b", fontWeight: 600, marginBottom: 10 }}>{message}</p>}
 

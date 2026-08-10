@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 type StockItem = {
   id: string;
   quantity: number;
-  product: { id: string; name: string; price: number; low_stock_threshold: number };
+  product: { id: string; name: string; price: number; low_stock_threshold: number; image_url: string | null };
 };
 type Product = { id: string; name: string; price: number };
 
@@ -477,10 +477,25 @@ export default function VendorPage() {
           const low = s.quantity <= s.product.low_stock_threshold;
           return (
             <div key={s.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderColor: low ? "#e59a3d" : undefined }}>
-              <div>
-                <strong>{s.product.name}</strong>
-                <div style={{ fontSize: 13, opacity: 0.7 }}>{s.product.price} FCFA</div>
-                {low && <div style={{ fontSize: 12, color: "#c0392b", fontWeight: 700, marginTop: 2 }}>⚠ Stock bas — pense à réapprovisionner</div>}
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {s.product.image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={s.product.image_url}
+                    alt={s.product.name}
+                    style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 10, flexShrink: 0 }}
+                    onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+                  />
+                ) : (
+                  <div style={{ width: 44, height: 44, borderRadius: 10, background: "#f1ede2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
+                    🍬
+                  </div>
+                )}
+                <div>
+                  <strong>{s.product.name}</strong>
+                  <div style={{ fontSize: 13, opacity: 0.7 }}>{s.product.price} FCFA</div>
+                  {low && <div style={{ fontSize: 12, color: "#c0392b", fontWeight: 700, marginTop: 2 }}>⚠ Stock bas — pense à réapprovisionner</div>}
+                </div>
               </div>
               <input
                 type="number"

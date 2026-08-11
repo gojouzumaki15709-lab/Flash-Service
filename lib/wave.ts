@@ -30,6 +30,14 @@ interface CreateSessionParams {
 export async function createWaveCheckoutSession(
   params: CreateSessionParams
 ): Promise<WaveCheckoutSession> {
+  // XOF n'a pas de décimales : orders.total est maintenant un entier en base
+  // (voir supabase/migration_v11_xof_integer_amounts.sql), donc un montant
+  // non entier ici signale un bug ailleurs. On ne l'arrondit plus
+  // silencieusement (ça masquait des écarts) : on refuse explicitement.
+  if (!Number.isInteger(params.amount)) {
+    throw new Error(`Montant XOF invalide (non entier) : ${params.amount}`);
+  }
+
   const res = await fetch(`${WAVE_BASE_URL}/v1/checkout/sessions`, {
     method: "POST",
     headers: {
@@ -37,7 +45,7 @@ export async function createWaveCheckoutSession(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      amount: String(Math.round(params.amount)), // XOF : pas de décimales, montant en string
+      amount: String(params.amount), // XOF : pas de décimales, montant en string
       currency: "XOF",
       client_reference: params.clientReference,
       success_url: params.successUrl,

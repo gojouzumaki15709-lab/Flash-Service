@@ -78,8 +78,8 @@ export async function PATCH(req: NextRequest) {
 
   const amountReceived =
     cashAmountReceived != null && cashAmountReceived !== "" ? Number(cashAmountReceived) : null;
-  if (amountReceived != null && (!Number.isFinite(amountReceived) || amountReceived < 0)) {
-    return NextResponse.json({ error: "Somme reçue invalide." }, { status: 400 });
+  if (amountReceived != null && (!Number.isInteger(amountReceived) || amountReceived < 0)) {
+    return NextResponse.json({ error: "Somme reçue invalide (doit être un entier, le FCFA n'a pas de centimes)." }, { status: 400 });
   }
 
   const { error } = await db.rpc("confirm_vendor_order_atomic", {

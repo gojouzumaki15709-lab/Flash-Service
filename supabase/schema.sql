@@ -61,7 +61,7 @@ create table products (
   id uuid primary key default gen_random_uuid(),
   name text not null,                 -- ex: Coca-Cola
   image_url text,
-  price numeric(10,2) not null,       -- prix fixe, identique partout
+  price integer not null,             -- prix fixe en FCFA (XOF n'a pas de décimales), identique partout
   low_stock_threshold int not null default 2,  -- seuil d'alerte fixe
   is_archived boolean not null default false,  -- "suppression" douce (préserve l'historique)
   created_at timestamptz not null default now()
@@ -105,8 +105,8 @@ create table orders (
   status text not null default 'pending',  -- pending | confirmed | cancelled
   payment_method_id uuid references payment_methods(id),
   is_debt boolean not null default false,  -- payé à crédit ?
-  total numeric(10,2) not null default 0,
-  cash_amount_received numeric(10,2),      -- si paiement liquide
+  total integer not null default 0,        -- FCFA, entier (XOF n'a pas de décimales)
+  cash_amount_received integer,            -- si paiement liquide
   confirmed_by_vendor boolean not null default false,
   wave_checkout_id text,                   -- id de session Wave (cos-xxx), si paiement Wave
   wave_transaction_id text,                -- id de transaction Wave une fois payé
@@ -123,7 +123,7 @@ create table order_items (
   product_id uuid not null references products(id),
   quantity int not null,                -- quantité COMMANDÉE à l'origine (ne change plus après confirmation)
   quantity_taken int,                   -- quantité réellement remise par le vendeur (peut différer si le client a pris moins)
-  unit_price numeric(10,2) not null    -- prix au moment de l'achat
+  unit_price integer not null           -- prix (FCFA) au moment de l'achat
 );
 
 -- ------------------------------------------------------------
@@ -133,7 +133,7 @@ create table debts (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null references clients(id),
   order_id uuid references orders(id),
-  amount numeric(10,2) not null,
+  amount integer not null,
   is_repaid boolean not null default false,
   repaid_at timestamptz,
   created_at timestamptz not null default now()
@@ -146,11 +146,11 @@ create table debt_repayments (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null references clients(id),
   debt_ids uuid[] not null,
-  amount numeric(10,2) not null,
+  amount integer not null,
   payment_method_id uuid references payment_methods(id),
   status text not null default 'pending',   -- pending | confirmed | cancelled
   confirmed_by_vendor_id uuid references vendors(id),
-  cash_amount_received numeric(10,2),
+  cash_amount_received integer,
   created_at timestamptz not null default now(),
   confirmed_at timestamptz
 );

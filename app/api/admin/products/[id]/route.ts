@@ -22,8 +22,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
   if (price !== undefined) {
     const priceNum = Number(price);
-    if (!Number.isFinite(priceNum) || priceNum < 0) {
-      return NextResponse.json({ error: "Prix invalide (doit être positif ou nul)." }, { status: 400 });
+    if (!Number.isInteger(priceNum) || priceNum < 0) {
+      return NextResponse.json({ error: "Prix invalide (doit être un entier positif ou nul, le FCFA n'a pas de centimes)." }, { status: 400 });
     }
     update.price = priceNum;
   }

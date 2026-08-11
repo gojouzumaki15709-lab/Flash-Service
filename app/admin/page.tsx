@@ -473,7 +473,7 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
       <form onSubmit={createProduct} className="card" style={{ display: "grid", gap: 10 }}>
         <p style={{ fontWeight: 700 }}>Ajouter un produit au catalogue</p>
         <input placeholder="Nom (ex: Coca-Cola)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-        <input type="number" placeholder="Prix (FCFA)" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required />
+        <input type="number" step="1" min="0" placeholder="Prix (FCFA, entier)" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required />
         <input placeholder="URL image (optionnel)" value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} />
         {form.imageUrl && (
           // eslint-disable-next-line @next/next/no-img-element

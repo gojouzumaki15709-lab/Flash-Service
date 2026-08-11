@@ -51,8 +51,8 @@ export async function PATCH(req: NextRequest) {
   }
 
   const received = cashAmountReceived != null && cashAmountReceived !== "" ? Number(cashAmountReceived) : null;
-  if (received != null && (!Number.isFinite(received) || received < 0)) {
-    return NextResponse.json({ error: "Somme reçue invalide." }, { status: 400 });
+  if (received != null && (!Number.isInteger(received) || received < 0)) {
+    return NextResponse.json({ error: "Somme reçue invalide (doit être un entier, le FCFA n'a pas de centimes)." }, { status: 400 });
   }
 
   const { error } = await db.rpc("confirm_debt_repayment_atomic", {

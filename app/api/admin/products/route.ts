@@ -32,8 +32,8 @@ export async function POST(req: NextRequest) {
   if (!trimmedName) {
     return NextResponse.json({ error: "Le nom du produit est requis." }, { status: 400 });
   }
-  if (!Number.isFinite(priceNum) || priceNum < 0) {
-    return NextResponse.json({ error: "Prix invalide (doit être positif ou nul)." }, { status: 400 });
+  if (!Number.isInteger(priceNum) || priceNum < 0) {
+    return NextResponse.json({ error: "Prix invalide (doit être un entier positif ou nul, le FCFA n'a pas de centimes)." }, { status: 400 });
   }
   if (!Number.isInteger(thresholdNum) || thresholdNum < 0) {
     return NextResponse.json({ error: "Seuil d'alerte invalide (doit être un entier positif ou nul)." }, { status: 400 });

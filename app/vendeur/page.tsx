@@ -354,6 +354,7 @@ export default function VendorPage() {
                 </label>
                 <input
                   type="number"
+                  step={1}
                   min={0}
                   value={editCash[order.id] ?? ""}
                   onChange={(e) => setEditCash((prev) => ({ ...prev, [order.id]: e.target.value }))}
@@ -416,6 +417,7 @@ export default function VendorPage() {
                 <label style={{ fontSize: 12, opacity: 0.7, marginRight: 4 }}>Somme reçue :</label>
                 <input
                   type="number"
+                  step={1}
                   min={0}
                   placeholder={String(r.amount)}
                   value={repaymentCash[r.id] ?? ""}

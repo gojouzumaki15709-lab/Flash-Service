@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { getSession } from "@/lib/auth";
 import { hashPassword } from "@/lib/auth";
+import { insertWithGeneratedCode } from "@/lib/identifiers";
 
 async function requireAdmin() {
   const session = await getSession();
@@ -23,13 +24,15 @@ export async function GET() {
   return NextResponse.json({ vendors: data });
 }
 
-// body: { code, name, password, buildingId, roomNumber }
+// body: { name, password, buildingId, roomNumber }
+// Le code de connexion (VENxxxxxx) n'est plus saisi par l'admin : il est
+// généré par le système pour rester simple et homogène.
 export async function POST(req: NextRequest) {
   const session = await requireAdmin();
   if (!session) return NextResponse.json({ error: "Non autorisé." }, { status: 401 });
 
-  const { code, name, password, buildingId, roomNumber } = await req.json();
-  if (!code || !name || !password || !buildingId) {
+  const { name, password, buildingId, roomNumber } = await req.json();
+  if (!name || !password || !buildingId) {
     return NextResponse.json({ error: "Champs manquants." }, { status: 400 });
   }
   const roomNum = Number(roomNumber);
@@ -39,11 +42,14 @@ export async function POST(req: NextRequest) {
 
   const db = supabaseAdmin();
   const password_hash = await hashPassword(password);
-  const { data, error } = await db
-    .from("vendors")
-    .insert({ code, name, password_hash, building_id: buildingId, room_number: roomNum, created_by: session.id })
-    .select()
-    .single();
+  const { data, error } = await insertWithGeneratedCode(db, "vendors", (code) => ({
+    code,
+    name,
+    password_hash,
+    building_id: buildingId,
+    room_number: roomNum,
+    created_by: session.id,
+  }));
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, vendor: data });

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Tab = "vendors" | "products" | "payments" | "alerts" | "clients";
+type Tab = "vendors" | "products" | "payments" | "alerts" | "clients" | "admins";
 
 const TAB_DEFS: [Tab, string][] = [
   ["vendors", "Vendeurs"],
@@ -11,6 +11,7 @@ const TAB_DEFS: [Tab, string][] = [
   ["payments", "Paiements"],
   ["alerts", "Alertes stock"],
   ["clients", "Clients fréquents"],
+  ["admins", "Admins"],
 ];
 
 export default function AdminPage() {
@@ -91,15 +92,91 @@ export default function AdminPage() {
       {tab === "payments" && <PaymentsTab onCount={(n) => reportCount("payments", n)} />}
       {tab === "alerts" && <AlertsTab onCount={(n) => reportCount("alerts", n)} />}
       {tab === "clients" && <ClientsTab onCount={(n) => reportCount("clients", n)} />}
+      {tab === "admins" && <AdminsTab onCount={(n) => reportCount("admins", n)} />}
     </main>
+  );
+}
+
+function AdminsTab({ onCount }: { onCount: (n: number) => void }) {
+  const [admins, setAdmins] = useState<any[]>([]);
+  const [form, setForm] = useState({ name: "", password: "" });
+  const [error, setError] = useState("");
+  const [lastCreatedCode, setLastCreatedCode] = useState("");
+
+  function load() {
+    fetch("/api/admin/admins").then((r) => r.json()).then((d) => {
+      const list = d.admins || [];
+      setAdmins(list);
+      onCount(list.length);
+    });
+  }
+  useEffect(load, []);
+
+  async function createAdmin(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLastCreatedCode("");
+    const res = await fetch("/api/admin/admins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    const data = await res.json();
+    if (!res.ok) return setError(data.error);
+    setForm({ name: "", password: "" });
+    setLastCreatedCode(data.admin?.code || "");
+    load();
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 20 }}>
+      <form onSubmit={createAdmin} className="card" style={{ display: "grid", gap: 10 }}>
+        <p style={{ fontWeight: 700 }}>Créer un compte admin</p>
+        <p style={{ fontSize: 12, opacity: 0.7, margin: "-4px 0 0" }}>
+          Le code de connexion (ex. ADMK7QX9F) est généré automatiquement, aléatoire et affiché une seule fois
+          ci-dessous : note-le tout de suite, il n'est plus jamais réaffiché ensuite. Un compte admin a accès à
+          tout (vendeurs, produits, paiements, et peut créer d'autres admins) — ne le communique qu'à une personne
+          de confiance, par un canal sûr.
+        </p>
+        {lastCreatedCode && (
+          <p style={{ fontSize: 13, background: "#eaf7ea", border: "1px solid #2e7d32", borderRadius: 6, padding: "6px 10px" }}>
+            Compte créé — code de connexion : <strong>{lastCreatedCode}</strong> (à communiquer avec son mot de passe, par un canal sûr)
+          </p>
+        )}
+        <input placeholder="Nom" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+        <input
+          type="password"
+          placeholder="Mot de passe (10 caractères min.)"
+          minLength={10}
+          value={form.password}
+          onChange={(e) => setForm({ ...form, password: e.target.value })}
+          required
+        />
+        {error && <p style={{ color: "#c0392b", fontSize: 13 }}>{error}</p>}
+        <button className="btn btn-primary" type="submit">Créer</button>
+      </form>
+
+      <div style={{ display: "grid", gap: 10 }}>
+        {admins.map((a) => (
+          <div key={a.id} className="card">
+            <strong>{a.name}</strong> ({a.code})
+            <div style={{ fontSize: 13, opacity: 0.7 }}>
+              Créé le {new Date(a.created_at).toLocaleDateString("fr-FR")}
+              {a.created_by?.name && <> — par {a.created_by.name}</>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
 function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
   const [vendors, setVendors] = useState<any[]>([]);
   const [buildings, setBuildings] = useState<any[]>([]);
-  const [form, setForm] = useState({ code: "", name: "", password: "", buildingId: "", roomNumber: "" });
+  const [form, setForm] = useState({ name: "", password: "", buildingId: "", roomNumber: "" });
   const [error, setError] = useState("");
+  const [lastCreatedCode, setLastCreatedCode] = useState("");
   const [expandedVendorId, setExpandedVendorId] = useState<string | null>(null);
   const [reassign, setReassign] = useState<Record<string, { buildingId: string; roomNumber: string }>>({});
   const [reassignMessage, setReassignMessage] = useState<Record<string, string>>({});
@@ -117,6 +194,7 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
   async function createVendor(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    setLastCreatedCode("");
     const res = await fetch("/api/admin/vendors", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -124,7 +202,8 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
     });
     const data = await res.json();
     if (!res.ok) return setError(data.error);
-    setForm({ code: "", name: "", password: "", buildingId: "", roomNumber: "" });
+    setForm({ name: "", password: "", buildingId: "", roomNumber: "" });
+    setLastCreatedCode(data.vendor?.code || "");
     load();
   }
 
@@ -177,7 +256,14 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
     <div style={{ display: "grid", gap: 20 }}>
       <form onSubmit={createVendor} className="card" style={{ display: "grid", gap: 10 }}>
         <p style={{ fontWeight: 700 }}>Créer un compte vendeur</p>
-        <input placeholder="Code de connexion" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} required />
+        <p style={{ fontSize: 12, opacity: 0.7, margin: "-4px 0 0" }}>
+          Le code de connexion (ex. VENK7QX9F) est généré automatiquement, pas besoin de le saisir.
+        </p>
+        {lastCreatedCode && (
+          <p style={{ fontSize: 13, background: "#eaf7ea", border: "1px solid #2e7d32", borderRadius: 6, padding: "6px 10px" }}>
+            Compte créé — code de connexion : <strong>{lastCreatedCode}</strong> (à communiquer au vendeur avec son mot de passe)
+          </p>
+        )}
         <input placeholder="Nom" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
         <input type="password" placeholder="Mot de passe" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
         <div style={{ display: "flex", gap: 8 }}>

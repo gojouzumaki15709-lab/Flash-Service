@@ -8,7 +8,6 @@ export default function Home() {
   const [mode, setMode] = useState<"login" | "register">("login");
 
   // connexion
-  const [role, setRole] = useState<"client" | "vendor" | "admin">("client");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
 
@@ -29,7 +28,7 @@ export default function Home() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier, password, role }),
+        body: JSON.stringify({ identifier, password }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -107,35 +106,6 @@ export default function Home() {
 
         {mode === "login" ? (
           <form onSubmit={submitLogin} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div>
-              <label className="label">Je me connecte en tant que</label>
-              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                {(
-                  [
-                    { key: "client", label: "Client" },
-                    { key: "vendor", label: "Vendeur" },
-                    { key: "admin", label: "Admin" },
-                  ] as const
-                ).map((r) => (
-                  <button
-                    key={r.key}
-                    type="button"
-                    onClick={() => setRole(r.key)}
-                    className="btn"
-                    style={{
-                      flex: 1,
-                      fontSize: 13,
-                      boxShadow: "none",
-                      background: role === r.key ? "var(--teal)" : "#f1ede2",
-                      color: role === r.key ? "#fff" : "inherit",
-                    }}
-                  >
-                    {r.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <div>
               <label className="label">Nom d'utilisateur</label>
               <input

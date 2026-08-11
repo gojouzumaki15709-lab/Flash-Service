@@ -241,18 +241,25 @@ export default function VendorPage() {
 
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: 20 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div className="app-header">
+        <div className="brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Flash Service" style={{ width: 40, height: 40, borderRadius: 10 }} />
-          <h1 className="display" style={{ fontSize: 20, color: "var(--teal)" }}>Espace vendeur</h1>
+          <img src="/logo.png" alt="Flash Service" />
+          <div className="brand-text">
+            <strong>Flash Service</strong>
+            <span>Espace vendeur</span>
+          </div>
         </div>
-        <button className="btn" style={{ background: "#f1ede2", boxShadow: "none", fontSize: 13 }} onClick={logout}>
+        <button
+          className="btn"
+          style={{ background: "rgba(255,255,255,0.12)", color: "var(--paper)", boxShadow: "none", fontSize: 13 }}
+          onClick={logout}
+        >
           Déconnexion
         </button>
       </div>
 
-      <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+      <div className="card-ticket" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
           <strong>Statut de la boutique</strong>{" "}
           <span className={`badge ${isOpen ? "badge-success" : "badge-neutral"}`} style={{ marginLeft: 6 }}>
@@ -275,7 +282,7 @@ export default function VendorPage() {
       </h2>
       <div style={{ display: "grid", gap: 12, marginBottom: 24 }}>
         {pendingOrders.map((order) => (
-          <div key={order.id} className="card" style={{ borderColor: "#e59a3d" }}>
+          <div key={order.id} className="card-ticket" style={{ borderColor: "#e59a3d" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
               <strong>{order.client?.name}</strong>
               <span style={{ fontSize: 13, opacity: 0.7 }}>{order.client?.phone}</span>
@@ -497,7 +504,7 @@ export default function VendorPage() {
                 )}
                 <div>
                   <strong>{s.product.name}</strong>
-                  <div style={{ fontSize: 13, opacity: 0.7 }}>{s.product.price} FCFA</div>
+                  <div style={{ fontSize: 13, opacity: 0.7 }} className="price">{s.product.price} FCFA</div>
                   {low && <div style={{ fontSize: 12, color: "#c0392b", fontWeight: 700, marginTop: 2 }}>⚠ Stock bas — pense à réapprovisionner</div>}
                 </div>
               </div>

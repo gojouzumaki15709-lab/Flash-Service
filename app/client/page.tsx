@@ -216,19 +216,26 @@ export default function ClientPage() {
 
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: 20 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div className="app-header">
+        <div className="brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Flash Service" style={{ width: 40, height: 40, borderRadius: 10 }} />
-          <h1 className="display" style={{ fontSize: 20, color: "var(--teal)" }}>Flash Service</h1>
+          <img src="/logo.png" alt="Flash Service" />
+          <div className="brand-text">
+            <strong>Flash Service</strong>
+            <span>Espace client</span>
+          </div>
         </div>
-        <button className="btn" style={{ background: "#f1ede2", boxShadow: "none", fontSize: 13 }} onClick={logout}>
+        <button
+          className="btn"
+          style={{ background: "rgba(255,255,255,0.12)", color: "var(--paper)", boxShadow: "none", fontSize: 13 }}
+          onClick={logout}
+        >
           Déconnexion
         </button>
       </div>
 
       {waveReturnMessage && (
-        <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--teal)" }}>
+        <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--sky)" }}>
           {waveReturnMessage}
         </div>
       )}
@@ -456,7 +463,7 @@ export default function ClientPage() {
                   <div>
                     <strong>{s.product.name}</strong>
                     <div style={{ fontSize: 13, opacity: 0.7 }}>
-                      {s.product.price} FCFA — en stock : {s.quantity}
+                      <span className="price">{s.product.price} FCFA</span> — en stock : {s.quantity}
                     </div>
                   </div>
                 </div>
@@ -473,8 +480,8 @@ export default function ClientPage() {
             ))}
           </div>
 
-          <div className="card">
-            <p style={{ fontWeight: 700, marginBottom: 10 }}>Total : {total} FCFA</p>
+          <div className="card-ticket">
+            <p style={{ fontWeight: 700, marginBottom: 10 }} className="price">Total : {total} FCFA</p>
 
             <label className="label">Mode de paiement</label>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))", gap: 8, margin: "8px 0 14px" }}>

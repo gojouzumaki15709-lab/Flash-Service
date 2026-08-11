@@ -29,13 +29,20 @@ export default function AdminPage() {
 
   return (
     <main style={{ maxWidth: 780, margin: "0 auto", padding: 20 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div className="app-header">
+        <div className="brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Flash Service" style={{ width: 40, height: 40, borderRadius: 10 }} />
-          <h1 className="display" style={{ fontSize: 20, color: "var(--teal)" }}>Administration</h1>
+          <img src="/logo.png" alt="Flash Service" />
+          <div className="brand-text">
+            <strong>Flash Service</strong>
+            <span>Administration</span>
+          </div>
         </div>
-        <button className="btn" style={{ background: "#f1ede2", boxShadow: "none", fontSize: 13 }} onClick={logout}>
+        <button
+          className="btn"
+          style={{ background: "rgba(255,255,255,0.12)", color: "var(--paper)", boxShadow: "none", fontSize: 13 }}
+          onClick={logout}
+        >
           Déconnexion
         </button>
       </div>
@@ -54,8 +61,8 @@ export default function AdminPage() {
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
-                background: tab === id ? "var(--teal)" : "#f1ede2",
-                color: tab === id ? "#fff" : "var(--ink)",
+                background: tab === id ? "var(--flash)" : "#f1ede2",
+                color: tab === id ? "#fff" : "var(--navy)",
                 boxShadow: "none",
               }}
               onClick={() => setTab(id)}

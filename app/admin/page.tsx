@@ -98,9 +98,11 @@ export default function AdminPage() {
 function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
   const [vendors, setVendors] = useState<any[]>([]);
   const [buildings, setBuildings] = useState<any[]>([]);
-  const [form, setForm] = useState({ code: "", name: "", password: "", buildingId: "" });
+  const [form, setForm] = useState({ code: "", name: "", password: "", buildingId: "", roomNumber: "" });
   const [error, setError] = useState("");
   const [expandedVendorId, setExpandedVendorId] = useState<string | null>(null);
+  const [reassign, setReassign] = useState<Record<string, { buildingId: string; roomNumber: string }>>({});
+  const [reassignMessage, setReassignMessage] = useState<Record<string, string>>({});
 
   function load() {
     fetch("/api/admin/vendors").then((r) => r.json()).then((d) => {
@@ -118,11 +120,11 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
     const res = await fetch("/api/admin/vendors", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, roomNumber: Number(form.roomNumber) }),
     });
     const data = await res.json();
     if (!res.ok) return setError(data.error);
-    setForm({ code: "", name: "", password: "", buildingId: "" });
+    setForm({ code: "", name: "", password: "", buildingId: "", roomNumber: "" });
     load();
   }
 
@@ -145,6 +147,32 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
     load();
   }
 
+  function reassignFieldsFor(v: any) {
+    return reassign[v.id] || { buildingId: "", roomNumber: v.room_number ? String(v.room_number) : "" };
+  }
+
+  async function saveReassign(v: any) {
+    setReassignMessage((m) => ({ ...m, [v.id]: "" }));
+    const fields = reassignFieldsFor(v);
+    const body: Record<string, unknown> = {};
+    if (fields.buildingId) body.buildingId = fields.buildingId;
+    if (fields.roomNumber) body.roomNumber = Number(fields.roomNumber);
+    if (!body.buildingId && !body.roomNumber) return;
+
+    const res = await fetch(`/api/admin/vendors/${v.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setReassignMessage((m) => ({ ...m, [v.id]: data.error || "Erreur." }));
+      return;
+    }
+    setReassignMessage((m) => ({ ...m, [v.id]: "Mis à jour." }));
+    load();
+  }
+
   return (
     <div style={{ display: "grid", gap: 20 }}>
       <form onSubmit={createVendor} className="card" style={{ display: "grid", gap: 10 }}>
@@ -152,12 +180,24 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
         <input placeholder="Code de connexion" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} required />
         <input placeholder="Nom" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
         <input type="password" placeholder="Mot de passe" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
-        <select value={form.buildingId} onChange={(e) => setForm({ ...form, buildingId: e.target.value })} required>
-          <option value="">— Bâtiment —</option>
-          {buildings.map((b) => (
-            <option key={b.id} value={b.id}>{b.letter}{b.number}</option>
-          ))}
-        </select>
+        <div style={{ display: "flex", gap: 8 }}>
+          <select value={form.buildingId} onChange={(e) => setForm({ ...form, buildingId: e.target.value })} required style={{ flex: 1 }}>
+            <option value="">— Bâtiment —</option>
+            {buildings.map((b) => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min={1}
+            max={96}
+            placeholder="Chambre (1-96)"
+            value={form.roomNumber}
+            onChange={(e) => setForm({ ...form, roomNumber: e.target.value })}
+            required
+            style={{ width: 130 }}
+          />
+        </div>
         {error && <p style={{ color: "#c0392b", fontSize: 13 }}>{error}</p>}
         <button className="btn btn-primary" type="submit">Créer</button>
       </form>
@@ -173,7 +213,11 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
                   </span>
                 )}
                 <div style={{ fontSize: 13, opacity: 0.7 }}>
-                  Bâtiment {v.building?.letter}{v.building?.number} — {v.is_open ? "Ouvert" : "Fermé"}
+                  {v.building?.name && v.room_number ? (
+                    <>Chambre {v.building.name}-{v.room_number} — {v.is_open ? "Ouvert" : "Fermé"}</>
+                  ) : (
+                    <span style={{ color: "#c0392b", fontWeight: 600 }}>Bâtiment/chambre non assignés — {v.is_open ? "Ouvert" : "Fermé"}</span>
+                  )}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
@@ -195,6 +239,33 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
                 )}
               </div>
             </div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+              <select
+                value={reassignFieldsFor(v).buildingId}
+                onChange={(e) => setReassign((r) => ({ ...r, [v.id]: { ...reassignFieldsFor(v), buildingId: e.target.value } }))}
+                style={{ fontSize: 13 }}
+              >
+                <option value="">— Changer de bâtiment —</option>
+                {buildings.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={1}
+                max={96}
+                placeholder="Chambre (1-96)"
+                value={reassignFieldsFor(v).roomNumber}
+                onChange={(e) => setReassign((r) => ({ ...r, [v.id]: { ...reassignFieldsFor(v), roomNumber: e.target.value } }))}
+                style={{ width: 130, fontSize: 13 }}
+              />
+              <button className="btn" style={{ fontSize: 12, boxShadow: "none", background: "#f1ede2" }} onClick={() => saveReassign(v)}>
+                Enregistrer
+              </button>
+              {reassignMessage[v.id] && <span style={{ fontSize: 12, opacity: 0.7 }}>{reassignMessage[v.id]}</span>}
+            </div>
+
             {expandedVendorId === v.id && <VendorStockManager vendorId={v.id} />}
           </div>
         ))}

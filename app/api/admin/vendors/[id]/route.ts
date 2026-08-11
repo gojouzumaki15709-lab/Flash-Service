@@ -28,22 +28,52 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   return NextResponse.json({ ok: true, vendor: data });
 }
 
-// body: { isActive: boolean } -> réactive ou redésactive un vendeur.
+// body: { isActive?: boolean, buildingId?: string, roomNumber?: number }
+// - isActive : réactive ou redésactive un vendeur.
+// - buildingId/roomNumber : réassigne le bâtiment/la chambre d'un vendeur
+//   (utile notamment après migration_room_model.sql, qui vide building_id
+//   de tous les vendeurs existants suite à la refonte du modèle bâtiment).
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getSession();
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "Non autorisé." }, { status: 401 });
   }
-  const { isActive } = await req.json();
-  if (typeof isActive !== "boolean") {
+  const { isActive, buildingId, roomNumber } = await req.json();
+
+  const update: Record<string, unknown> = {};
+
+  if (isActive !== undefined) {
+    if (typeof isActive !== "boolean") {
+      return NextResponse.json({ error: "Requête invalide." }, { status: 400 });
+    }
+    update.is_active = isActive;
+  }
+
+  if (buildingId !== undefined) {
+    if (typeof buildingId !== "string" || !buildingId) {
+      return NextResponse.json({ error: "Bâtiment invalide." }, { status: 400 });
+    }
+    update.building_id = buildingId;
+  }
+
+  if (roomNumber !== undefined) {
+    const roomNum = Number(roomNumber);
+    if (!Number.isInteger(roomNum) || roomNum < 1 || roomNum > 96) {
+      return NextResponse.json({ error: "Numéro de chambre invalide (1 à 96)." }, { status: 400 });
+    }
+    update.room_number = roomNum;
+  }
+
+  if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "Requête invalide." }, { status: 400 });
   }
+
   const db = supabaseAdmin();
   const { data, error } = await db
     .from("vendors")
-    .update({ is_active: isActive })
+    .update(update)
     .eq("id", params.id)
-    .select("id, name, is_active")
+    .select("id, name, is_active, room_number, building:buildings(name)")
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -19,16 +19,26 @@ function clientIp(req: NextRequest): string {
   return req.headers.get("x-real-ip") || "unknown";
 }
 
-// body: { identifier: string, password: string }
+// body: { identifier: string, password: string, role: "admin" | "vendor" | "client" }
 // identifier = code (admin/vendeur) ou nom d'utilisateur (client).
-// Le rôle n'est jamais demandé à l'utilisateur : on le déduit en cherchant
-// l'identifiant dans les 3 tables. Ça évite d'exposer publiquement qu'un
-// login "admin" ou "vendeur" existe.
-export async function POST(req: NextRequest) {
-  const { identifier, password } = await req.json();
+// Le rôle est désormais choisi explicitement par la personne qui se
+// connecte (boutons sur la page de login), et on ne cherche PLUS
+// l'identifiant dans les 3 tables l'une après l'autre. Avant ce
+// changement, une même personne ayant un compte admin ET un compte
+// vendeur/client avec le même code+mot de passe était TOUJOURS
+// redirigée vers /admin, sans pouvoir choisir de se connecter comme
+// vendeur ou client. Chercher uniquement dans la table du rôle choisi
+// corrige ça.
+const VALID_ROLES = ["admin", "vendor", "client"] as const;
 
-  if (!identifier || !password) {
+export async function POST(req: NextRequest) {
+  const { identifier, password, role } = await req.json();
+
+  if (!identifier || !password || !role) {
     return NextResponse.json({ error: "Champs manquants." }, { status: 400 });
+  }
+  if (!VALID_ROLES.includes(role)) {
+    return NextResponse.json({ error: "Rôle invalide." }, { status: 400 });
   }
 
   const db = supabaseAdmin();
@@ -71,34 +81,36 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 1. Essayer admin
-  const { data: admin } = await db.from("admins").select("*").eq("code", identifier).maybeSingle();
-  if (admin && (await verifyPassword(password, admin.password_hash))) {
-    await createSession({ id: admin.id, role: "admin", name: admin.name });
-    return NextResponse.json({ ok: true, redirect: "/admin" });
-  }
-
-  // 2. Essayer vendeur
-  const { data: vendor } = await db.from("vendors").select("*").eq("code", identifier).maybeSingle();
-  if (vendor && (await verifyPassword(password, vendor.password_hash))) {
-    if (vendor.is_active === false) {
-      // Mot de passe correct, mais compte désactivé par un admin : on ne
-      // délivre pas de session. Message générique, cohérent avec le reste
-      // de la route (on ne veut pas révéler l'existence du compte non plus).
-      return NextResponse.json({ error: "Identifiant ou mot de passe incorrect." }, { status: 401 });
+  // On ne cherche QUE dans la table correspondant au rôle choisi. Une
+  // personne qui a plusieurs comptes (ex: admin ET vendeur) doit donc
+  // choisir explicitement lequel utiliser à chaque connexion.
+  if (role === "admin") {
+    const { data: admin } = await db.from("admins").select("*").eq("code", identifier).maybeSingle();
+    if (admin && (await verifyPassword(password, admin.password_hash))) {
+      await createSession({ id: admin.id, role: "admin", name: admin.name });
+      return NextResponse.json({ ok: true, redirect: "/admin" });
     }
-    await createSession({ id: vendor.id, role: "vendor", name: vendor.name, buildingId: vendor.building_id });
-    return NextResponse.json({ ok: true, redirect: "/vendeur" });
-  }
-
-  // 3. Essayer client
-  const { data: client } = await db.from("clients").select("*").eq("username", identifier).maybeSingle();
-  if (client && (await verifyPassword(password, client.password_hash))) {
-    await createSession({ id: client.id, role: "client", name: client.name, phone: client.phone });
-    return NextResponse.json({ ok: true, redirect: "/client" });
+  } else if (role === "vendor") {
+    const { data: vendor } = await db.from("vendors").select("*").eq("code", identifier).maybeSingle();
+    if (vendor && (await verifyPassword(password, vendor.password_hash))) {
+      if (vendor.is_active === false) {
+        // Mot de passe correct, mais compte désactivé par un admin : on ne
+        // délivre pas de session. Message générique, cohérent avec le reste
+        // de la route (on ne veut pas révéler l'existence du compte non plus).
+        return NextResponse.json({ error: "Identifiant ou mot de passe incorrect." }, { status: 401 });
+      }
+      await createSession({ id: vendor.id, role: "vendor", name: vendor.name, buildingId: vendor.building_id });
+      return NextResponse.json({ ok: true, redirect: "/vendeur" });
+    }
+  } else if (role === "client") {
+    const { data: client } = await db.from("clients").select("*").eq("username", identifier).maybeSingle();
+    if (client && (await verifyPassword(password, client.password_hash))) {
+      await createSession({ id: client.id, role: "client", name: client.name, phone: client.phone });
+      return NextResponse.json({ ok: true, redirect: "/client" });
+    }
   }
 
   // Volontairement le même message dans tous les cas d'échec (ne révèle pas
-  // si l'identifiant existe ou non, ni à quel rôle il appartient).
+  // si l'identifiant existe ou non pour le rôle choisi).
   return NextResponse.json({ error: "Identifiant ou mot de passe incorrect." }, { status: 401 });
 }

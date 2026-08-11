@@ -20,6 +20,7 @@ type PendingOrder = {
   id: string;
   total: number;
   created_at: string;
+  client_room: string | null;
   client: { name: string; phone: string };
   payment_method: { type: string; label: string } | null;
   items: PendingOrderItem[];
@@ -283,10 +284,26 @@ export default function VendorPage() {
       <div style={{ display: "grid", gap: 12, marginBottom: 24 }}>
         {pendingOrders.map((order) => (
           <div key={order.id} className="card-ticket" style={{ borderColor: "#e59a3d" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
               <strong>{order.client?.name}</strong>
               <span style={{ fontSize: 13, opacity: 0.7 }}>{order.client?.phone}</span>
             </div>
+            {order.client_room && (
+              <div style={{ marginBottom: 8 }}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    padding: "3px 8px",
+                    borderRadius: 999,
+                    background: "#eef2ff",
+                    color: "#3730a3",
+                  }}
+                >
+                  📍 Chambre {order.client_room}
+                </span>
+              </div>
+            )}
             <div style={{ marginBottom: 8 }}>
               <span
                 style={{

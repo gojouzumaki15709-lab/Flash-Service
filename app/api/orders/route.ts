@@ -26,21 +26,32 @@ function errorMessageFor(code: string): { message: string; status: number } {
   if (code === "DEBT_LIMIT_EXCEEDED")
     return { message: `Plafond de dette dépassé (max ${DEBT_LIMIT} FCFA). Rembourse avant d'emprunter à nouveau.`, status: 400 };
   if (code === "EMPTY_ORDER") return { message: "Commande vide.", status: 400 };
+  if (code === "CLIENT_ROOM_REQUIRED") return { message: "Indique ta chambre (ex: 12-67 ou B-67).", status: 400 };
   if (code.startsWith("INSUFFICIENT_STOCK")) return { message: "Stock insuffisant pour un ou plusieurs produits.", status: 400 };
   return { message: "Erreur lors de la création de la commande.", status: 500 };
 }
 
-// body: { vendorId, items: [{ productId, quantity }], paymentMethodId, isDebt }
+// Bâtiment : "1" à "16" (numérotés) ou "A" à "Z" (lettrés). Chambre : 1 à 96.
+// Format attendu : "<bâtiment>-<chambre>", ex: "12-67" ou "B-67".
+const ROOM_FORMAT = /^([A-Z]|[1-9]|1[0-6])-([1-9]|[1-8][0-9]|9[0-6])$/;
+
+// body: { vendorId, items: [{ productId, quantity }], paymentMethodId, isDebt, room }
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session || session.role !== "client") {
     return NextResponse.json({ error: "Connecte-toi en tant que client." }, { status: 401 });
   }
 
-  const { vendorId, items, paymentMethodId, isDebt } = await req.json();
+  const { vendorId, items, paymentMethodId, isDebt, room } = await req.json();
   if (!vendorId || !items?.length) {
     return NextResponse.json({ error: "Commande vide." }, { status: 400 });
   }
+
+  const clientRoom = typeof room === "string" ? room.trim().toUpperCase() : "";
+  if (!clientRoom || !ROOM_FORMAT.test(clientRoom)) {
+    return NextResponse.json({ error: "Indique ta chambre au format bâtiment-chambre (ex: 12-67 ou B-67)." }, { status: 400 });
+  }
+
 
   // Validation basique des entrées avant même d'appeler la DB.
   const cleanItems: { product_id: string; quantity: number }[] = [];
@@ -72,6 +83,7 @@ export async function POST(req: NextRequest) {
     p_payment_method_id: paymentMethodId || null,
     p_is_debt: !!isDebt,
     p_debt_limit: DEBT_LIMIT,
+    p_client_room: clientRoom,
   });
 
   if (rpcError || !result) {

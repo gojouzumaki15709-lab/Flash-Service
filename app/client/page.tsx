@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Vendor = { id: string; name: string; is_open: boolean; building: { letter: string; number: number } };
+type Vendor = { id: string; name: string; is_open: boolean; room_number: number; building: { name: string } };
 type StockItem = { id: string; quantity: number; product: { id: string; name: string; image_url: string | null; price: number } };
 type PaymentMethod = { id: string; type: string; label: string; is_active: boolean; icon_url: string | null };
 type Debt = { id: string; amount: number; created_at: string; order: { vendor: { name: string } } | null };
@@ -27,6 +27,12 @@ const STATUS_LABELS: Record<string, { label: string; badgeClass: string }> = {
   cancelled: { label: "Annulée", badgeClass: "badge-danger" },
 };
 
+// 42 bâtiments possibles : "1" à "16" (numérotés), puis "A" à "Z" (lettrés).
+const BUILDING_NAMES = [
+  ...Array.from({ length: 16 }, (_, i) => String(i + 1)),
+  ...Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)),
+];
+
 export default function ClientPage() {
   const router = useRouter();
   const [view, setView] = useState<"vendors" | "history">("vendors");
@@ -35,6 +41,8 @@ export default function ClientPage() {
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [stock, setStock] = useState<StockItem[]>([]);
   const [cart, setCart] = useState<Record<string, number>>({});
+  const [roomBuilding, setRoomBuilding] = useState("");
+  const [roomNumber, setRoomNumber] = useState("");
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [paymentMethodId, setPaymentMethodId] = useState("");
   const [isDebt, setIsDebt] = useState(false);
@@ -163,6 +171,11 @@ export default function ClientPage() {
       setMessage("Choisis un mode de paiement.");
       return;
     }
+    const roomNum = Number(roomNumber);
+    if (!roomBuilding || !roomNumber || !Number.isInteger(roomNum) || roomNum < 1 || roomNum > 96) {
+      setMessage("Indique ta chambre (bâtiment + numéro de 1 à 96).");
+      return;
+    }
     const res = await fetch("/api/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -171,6 +184,7 @@ export default function ClientPage() {
         items,
         paymentMethodId: isDebt ? null : paymentMethodId,
         isDebt,
+        room: `${roomBuilding}-${roomNum}`,
       }),
     });
     const data = await res.json();
@@ -400,7 +414,7 @@ export default function ClientPage() {
                     <div>
                       <strong>{v.name}</strong>
                       <div style={{ fontSize: 13, opacity: 0.7 }}>
-                        Bâtiment {v.building.letter}{v.building.number}
+                        Chambre {v.building.name}-{v.room_number}
                       </div>
                     </div>
                     <span
@@ -482,6 +496,26 @@ export default function ClientPage() {
 
           <div className="card-ticket">
             <p style={{ fontWeight: 700, marginBottom: 10 }} className="price">Total : {total} FCFA</p>
+
+            <label className="label">Ta chambre</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              <select value={roomBuilding} onChange={(e) => setRoomBuilding(e.target.value)} required style={{ flex: 1 }}>
+                <option value="">— Bâtiment —</option>
+                {BUILDING_NAMES.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={1}
+                max={96}
+                value={roomNumber}
+                onChange={(e) => setRoomNumber(e.target.value)}
+                placeholder="Chambre (1-96)"
+                style={{ width: 140 }}
+                required
+              />
+            </div>
 
             <label className="label">Mode de paiement</label>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))", gap: 8, margin: "8px 0 14px" }}>

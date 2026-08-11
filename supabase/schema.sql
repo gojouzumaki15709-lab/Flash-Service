@@ -7,14 +7,12 @@
 create extension if not exists "pgcrypto";
 
 -- ------------------------------------------------------------
--- 1. BÂTIMENTS (liste fixe : lettre A-Z + numéro 1-16)
+-- 1. BÂTIMENTS (liste fixe : 16 numérotés "1".."16" + 26 lettrés "A".."Z" = 42 bâtiments)
 -- ------------------------------------------------------------
 create table buildings (
   id uuid primary key default gen_random_uuid(),
-  letter char(1) not null,      -- A à Z
-  number int not null,          -- 1 à 16
-  created_at timestamptz not null default now(),
-  unique (letter, number)
+  name text not null unique,    -- "1" à "16", ou "A" à "Z"
+  created_at timestamptz not null default now()
 );
 
 -- ------------------------------------------------------------
@@ -37,7 +35,9 @@ create table vendors (
   name text not null,
   password_hash text not null,
   building_id uuid not null references buildings(id),
+  room_number int not null check (room_number >= 1 and room_number <= 96),  -- chambre du vendeur dans son bâtiment (1-96)
   is_open boolean not null default false,   -- ouvert = connecté / en service
+  is_active boolean not null default true,  -- false = désactivé par un admin
   created_by uuid references admins(id),
   created_at timestamptz not null default now()
 );
@@ -110,6 +110,7 @@ create table orders (
   confirmed_by_vendor boolean not null default false,
   wave_checkout_id text,                   -- id de session Wave (cos-xxx), si paiement Wave
   wave_transaction_id text,                -- id de transaction Wave une fois payé
+  client_room text,                        -- chambre du client au moment de la commande, ex: "B-67"
   created_at timestamptz not null default now()
 );
 
@@ -202,18 +203,11 @@ alter table debt_repayments enable row level security;
 alter table wave_webhook_events enable row level security;
 
 -- ------------------------------------------------------------
--- Pré-remplir les 26 x 16 bâtiments possibles (A1 -> Z16)
+-- Pré-remplir les 42 bâtiments (16 numérotés "1".."16" + 26 lettrés "A".."Z")
 -- Tu pourras supprimer ceux qui ne servent pas depuis l'admin.
 -- ------------------------------------------------------------
-do $$
-declare
-  l char(1);
-  n int;
-begin
-  for l in select chr(g) from generate_series(65,90) g loop
-    for n in 1..16 loop
-      insert into buildings (letter, number) values (l, n)
-      on conflict do nothing;
-    end loop;
-  end loop;
-end $$;
+insert into buildings (name)
+select n::text from generate_series(1, 16) n
+union all
+select chr(g) from generate_series(65, 90) g
+on conflict (name) do nothing;

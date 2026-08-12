@@ -6,14 +6,12 @@ import { useRouter } from "next/navigation";
 type Vendor = { id: string; name: string; is_open: boolean; room_number: number; building: { name: string } };
 type StockItem = { id: string; quantity: number; product: { id: string; name: string; image_url: string | null; price: number } };
 type PaymentMethod = { id: string; type: string; label: string; is_active: boolean; icon_url: string | null };
-type Debt = { id: string; amount: number; created_at: string; order: { vendor: { name: string } } | null };
 
 type OrderHistoryItem = { quantity: number; quantity_taken: number | null; unit_price: number; product: { name: string } };
 type OrderHistory = {
   id: string;
   total: number;
   status: string;
-  is_debt: boolean;
   cash_amount_received: number | null;
   created_at: string;
   vendor: { name: string } | null;
@@ -45,69 +43,10 @@ export default function ClientPage() {
   const [roomNumber, setRoomNumber] = useState("");
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [paymentMethodId, setPaymentMethodId] = useState("");
-  const [isDebt, setIsDebt] = useState(false);
   const [message, setMessage] = useState("");
-  const [debtTotal, setDebtTotal] = useState(0);
-  const [debts, setDebts] = useState<Debt[]>([]);
-  const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set());
-  const [pendingRepaymentDebtIds, setPendingRepaymentDebtIds] = useState<Set<string>>(new Set());
-  const [repayMethodId, setRepayMethodId] = useState("");
-  const [repayMessage, setRepayMessage] = useState("");
   const [orderHistory, setOrderHistory] = useState<OrderHistory[]>([]);
   const [totalSpent, setTotalSpent] = useState(0);
   const [historyLoaded, setHistoryLoaded] = useState(false);
-
-  async function loadDebts() {
-    const res = await fetch("/api/client/debts");
-    const data = await res.json();
-    setDebtTotal(data.total || 0);
-    setDebts(data.debts || []);
-    setPendingRepaymentDebtIds(new Set<string>(data.pendingDebtIds || []));
-    setSelectedDebtIds((prev) => {
-      const next = new Set(prev);
-      for (const id of data.pendingDebtIds || []) next.delete(id);
-      return next;
-    });
-  }
-
-  function toggleDebtSelection(debtId: string) {
-    setSelectedDebtIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(debtId)) next.delete(debtId);
-      else next.add(debtId);
-      return next;
-    });
-  }
-
-  const selectedDebtsTotal = debts
-    .filter((d) => selectedDebtIds.has(d.id))
-    .reduce((sum, d) => sum + Number(d.amount), 0);
-
-  async function submitRepayment() {
-    setRepayMessage("");
-    const res = await fetch("/api/client/debts/repay", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        debtIds: Array.from(selectedDebtIds),
-        paymentMethodId: repayMethodId || null,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setRepayMessage(data.error);
-      return;
-    }
-    if (data.waveLaunchUrl) {
-      window.open(data.waveLaunchUrl, "_blank");
-      setRepayMessage(`Paie exactement ${selectedDebtsTotal} FCFA via Wave (nouvel onglet), un vendeur confirmera dès réception.`);
-    } else {
-      setRepayMessage("Enregistré : un vendeur confirmera dès réception du paiement en liquide.");
-    }
-    setSelectedDebtIds(new Set());
-    setRepayMethodId("");
-    loadDebts();
-  }
 
   async function loadHistory() {
     const res = await fetch("/api/client/orders");
@@ -120,7 +59,6 @@ export default function ClientPage() {
   useEffect(() => {
     fetch("/api/vendors").then((r) => r.json()).then((d) => setVendors(d.vendors || []));
     fetch("/api/admin/payment-methods").then((r) => r.json()).then((d) => setPaymentMethods((d.paymentMethods || []).filter((p: PaymentMethod) => p.is_active)));
-    loadDebts();
 
     // Retour depuis Wave après paiement (succès ou erreur). Le statut réel de
     // la commande est confirmé côté serveur par le webhook Wave, pas par ce
@@ -167,7 +105,7 @@ export default function ClientPage() {
       setMessage("Ton panier est vide.");
       return;
     }
-    if (!isDebt && !paymentMethodId) {
+    if (!paymentMethodId) {
       setMessage("Choisis un mode de paiement.");
       return;
     }
@@ -182,8 +120,7 @@ export default function ClientPage() {
       body: JSON.stringify({
         vendorId: selectedVendor!.id,
         items,
-        paymentMethodId: isDebt ? null : paymentMethodId,
-        isDebt,
+        paymentMethodId,
         room: `${roomBuilding}-${roomNum}`,
       }),
     });
@@ -211,7 +148,6 @@ export default function ClientPage() {
       );
       setCart({});
       openVendor(selectedVendor!);
-      loadDebts();
       setHistoryLoaded(false);
       return;
     }
@@ -219,7 +155,6 @@ export default function ClientPage() {
     setMessage("Commande passée avec succès !");
     setCart({});
     openVendor(selectedVendor!);
-    loadDebts();
     setHistoryLoaded(false);
   }
 
@@ -311,7 +246,7 @@ export default function ClientPage() {
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
                         <span style={{ opacity: 0.6 }}>
                           {new Date(o.created_at).toLocaleDateString("fr-FR")} —{" "}
-                          {o.is_debt ? "Dette" : o.payment_method?.label || "—"}
+                          {o.payment_method?.label || "—"}
                         </span>
                         <strong>{o.total} FCFA</strong>
                       </div>
@@ -323,92 +258,18 @@ export default function ClientPage() {
             </>
           ) : (
             <>
-              {debtTotal > 0 && (
-                <div className="card" style={{ marginBottom: 16, borderColor: "#e59a3d" }}>
-                  <p style={{ fontWeight: 700, marginBottom: 6 }}>
-                    Dette actuelle : {debtTotal} FCFA <span style={{ fontWeight: 400, opacity: 0.7 }}>(plafond 1000 FCFA)</span>
-                  </p>
-                  <div style={{ display: "grid", gap: 4, marginBottom: 10 }}>
-                    {debts.map((d) => {
-                      const pending = pendingRepaymentDebtIds.has(d.id);
-                      return (
-                        <label
-                          key={d.id}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            fontSize: 13,
-                            opacity: pending ? 0.5 : 0.9,
-                            gap: 8,
-                          }}
-                        >
-                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <input
-                              type="checkbox"
-                              disabled={pending}
-                              checked={selectedDebtIds.has(d.id)}
-                              onChange={() => toggleDebtSelection(d.id)}
-                            />
-                            {d.order?.vendor?.name || "Vendeur"} — {new Date(d.created_at).toLocaleDateString("fr-FR")}
-                            {pending && <span style={{ fontSize: 11, opacity: 0.8 }}> (remboursement en attente)</span>}
-                          </span>
-                          <span>{d.amount} FCFA</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-
-                  {selectedDebtIds.size > 0 && (
-                    <div style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
-                        Rembourser {selectedDebtsTotal} FCFA sélectionné(s)
-                      </p>
-                      <select
-                        value={repayMethodId}
-                        onChange={(e) => setRepayMethodId(e.target.value)}
-                        style={{ marginBottom: 8 }}
-                      >
-                        <option value="">Je paierai en liquide chez un vendeur</option>
-                        {paymentMethods
-                          .filter((p) => p.type === "wave")
-                          .map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.label} (paiement en ligne)
-                            </option>
-                          ))}
-                      </select>
-                      {repayMessage && (
-                        <p style={{ color: repayMessage.includes("succès") || repayMessage.includes("enregistr") ? "var(--teal)" : "#c0392b", fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-                          {repayMessage}
-                        </p>
-                      )}
-                      <button className="btn btn-primary" style={{ width: "100%" }} onClick={submitRepayment}>
-                        {repayMethodId ? "Payer via Wave" : "Enregistrer (je paierai en liquide)"}
-                      </button>
-                    </div>
-                  )}
-
-                  <p style={{ fontSize: 12, opacity: 0.6, marginTop: 10 }}>
-                    Choix "liquide" : un vendeur confirmera dès réception du paiement en personne. Choix Wave : paie le montant exact via le lien, un vendeur confirmera dès réception.
-                  </p>
-                </div>
-              )}
-
               <h2 style={{ fontSize: 18, marginBottom: 12 }}>Vendeurs</h2>
               <div style={{ display: "grid", gap: 10 }}>
                 {vendors.map((v) => (
                   <button
                     key={v.id}
-                    onClick={() => v.is_open && openVendor(v)}
+                    onClick={() => openVendor(v)}
                     className="card"
                     style={{
                       textAlign: "left",
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "center",
-                      opacity: v.is_open ? 1 : 0.5,
-                      cursor: v.is_open ? "pointer" : "not-allowed",
                     }}
                   >
                     <div>
@@ -423,15 +284,15 @@ export default function ClientPage() {
                         fontWeight: 700,
                         padding: "4px 10px",
                         borderRadius: 999,
-                        background: v.is_open ? "#e5f5ef" : "#f1ede2",
-                        color: v.is_open ? "var(--teal)" : "#888",
+                        background: "#e5f5ef",
+                        color: "var(--teal)",
                       }}
                     >
-                      {v.is_open ? "Ouvert" : "Fermé"}
+                      Ouvert
                     </span>
                   </button>
                 ))}
-                {!vendors.length && <p style={{ opacity: 0.6 }}>Aucun vendeur pour le moment.</p>}
+                {!vendors.length && <p style={{ opacity: 0.6 }}>Aucun vendeur ouvert pour le moment.</p>}
               </div>
             </>
           )}
@@ -520,15 +381,12 @@ export default function ClientPage() {
             <label className="label">Mode de paiement</label>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))", gap: 8, margin: "8px 0 14px" }}>
               {paymentMethods.map((p) => {
-                const selected = !isDebt && paymentMethodId === p.id;
+                const selected = paymentMethodId === p.id;
                 return (
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => {
-                      setIsDebt(false);
-                      setPaymentMethodId(p.id);
-                    }}
+                    onClick={() => setPaymentMethodId(p.id)}
                     className="card"
                     style={{
                       display: "flex",
@@ -556,34 +414,7 @@ export default function ClientPage() {
                   </button>
                 );
               })}
-              <button
-                type="button"
-                onClick={() => {
-                  setIsDebt(true);
-                  setPaymentMethodId("");
-                }}
-                className="card"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "10px 6px",
-                  cursor: "pointer",
-                  border: isDebt ? "2px solid var(--mango-dark)" : "1px solid var(--line)",
-                  background: isDebt ? "#fff1e6" : "#fff",
-                }}
-              >
-                <span style={{ fontSize: 22 }}>🕒</span>
-                <span style={{ fontSize: 11, fontWeight: 700, textAlign: "center" }}>Dette</span>
-              </button>
             </div>
-
-            {isDebt && (
-              <p style={{ fontSize: 12, opacity: 0.7, marginTop: -8, marginBottom: 12 }}>
-                Plafond 1000 FCFA — reste {Math.max(0, 1000 - debtTotal)} FCFA disponible.
-              </p>
-            )}
 
             {message && <p style={{ color: message.includes("succès") ? "var(--teal)" : "#c0392b", fontWeight: 600, marginBottom: 10 }}>{message}</p>}
 

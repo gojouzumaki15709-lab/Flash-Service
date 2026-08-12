@@ -4,8 +4,6 @@ import { getSession } from "@/lib/auth";
 import { createWaveCheckoutSession } from "@/lib/wave";
 import { decryptSecret } from "@/lib/crypto";
 
-const DEBT_LIMIT = 1000;
-
 function siteUrl(req: NextRequest) {
   // En prod sur Vercel, NEXT_PUBLIC_SITE_URL doit être défini (ex: https://flash-service.vercel.app).
   // En dev local, on retombe sur l'origine de la requête.
@@ -18,13 +16,9 @@ function errorMessageFor(code: string): { message: string; status: number } {
   if (code === "VENDOR_CLOSED") return { message: "Ce vendeur est fermé.", status: 400 };
   if (code === "PAYMENT_METHOD_NOT_FOUND") return { message: "Moyen de paiement introuvable.", status: 400 };
   if (code === "PAYMENT_METHOD_INACTIVE") return { message: "Ce moyen de paiement n'est plus disponible.", status: 400 };
-  if (code === "DEBT_CANNOT_HAVE_PAYMENT_METHOD")
-    return { message: "Une commande à crédit ne peut pas avoir de moyen de paiement.", status: 400 };
   if (code === "UNSUPPORTED_PAYMENT_METHOD")
-    return { message: "Moyen de paiement invalide : choisis liquide, Wave, ou paiement à crédit.", status: 400 };
+    return { message: "Moyen de paiement invalide : choisis liquide ou Wave.", status: 400 };
   if (code === "INVALID_QUANTITY") return { message: "Quantité invalide.", status: 400 };
-  if (code === "DEBT_LIMIT_EXCEEDED")
-    return { message: `Plafond de dette dépassé (max ${DEBT_LIMIT} FCFA). Rembourse avant d'emprunter à nouveau.`, status: 400 };
   if (code === "EMPTY_ORDER") return { message: "Commande vide.", status: 400 };
   if (code === "CLIENT_ROOM_REQUIRED") return { message: "Indique ta chambre (ex: 12-67 ou B-67).", status: 400 };
   if (code.startsWith("INSUFFICIENT_STOCK")) return { message: "Stock insuffisant pour un ou plusieurs produits.", status: 400 };
@@ -35,16 +29,19 @@ function errorMessageFor(code: string): { message: string; status: number } {
 // Format attendu : "<bâtiment>-<chambre>", ex: "12-67" ou "B-67".
 const ROOM_FORMAT = /^([A-Z]|[1-9]|1[0-6])-([1-9]|[1-8][0-9]|9[0-6])$/;
 
-// body: { vendorId, items: [{ productId, quantity }], paymentMethodId, isDebt, room }
+// body: { vendorId, items: [{ productId, quantity }], paymentMethodId, room }
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session || session.role !== "client") {
     return NextResponse.json({ error: "Connecte-toi en tant que client." }, { status: 401 });
   }
 
-  const { vendorId, items, paymentMethodId, isDebt, room } = await req.json();
+  const { vendorId, items, paymentMethodId, room } = await req.json();
   if (!vendorId || !items?.length) {
     return NextResponse.json({ error: "Commande vide." }, { status: 400 });
+  }
+  if (!paymentMethodId) {
+    return NextResponse.json({ error: "Choisis un mode de paiement." }, { status: 400 });
   }
 
   const clientRoom = typeof room === "string" ? room.trim().toUpperCase() : "";
@@ -69,20 +66,17 @@ export async function POST(req: NextRequest) {
 
   const db = supabaseAdmin();
 
-  // Toute la vérification (vendeur ouvert, stock, plafond de dette,
-  // type de paiement) et l'écriture (commande + lignes + décrément du
-  // stock + dette éventuelle) se font en UNE SEULE transaction
-  // PostgreSQL côté serveur. Voir create_order_atomic dans
-  // supabase/migration_hardening.sql — ceci remplace l'ancienne suite
-  // SELECT/UPDATE en JS qui était vulnérable aux races conditions et
-  // pouvait confirmer une commande sans paiement vérifié.
+  // Toute la vérification (vendeur ouvert, stock, type de paiement) et
+  // l'écriture (commande + lignes + décrément du stock) se font en UNE
+  // SEULE transaction PostgreSQL côté serveur. Voir create_order_atomic
+  // dans supabase/migration_remove_debt_system.sql — ceci remplace
+  // l'ancienne suite SELECT/UPDATE en JS qui était vulnérable aux races
+  // conditions et pouvait confirmer une commande sans paiement vérifié.
   const { data: result, error: rpcError } = await db.rpc("create_order_atomic", {
     p_client_id: session.id,
     p_vendor_id: vendorId,
     p_items: cleanItems,
-    p_payment_method_id: paymentMethodId || null,
-    p_is_debt: !!isDebt,
-    p_debt_limit: DEBT_LIMIT,
+    p_payment_method_id: paymentMethodId,
     p_client_room: clientRoom,
   });
 

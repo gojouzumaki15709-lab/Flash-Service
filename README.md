@@ -58,5 +58,4 @@ git push -u origin main
 - Seul un administrateur peut créer/supprimer un compte vendeur (onglet "Vendeurs" du dashboard admin).
 - Seul un administrateur crée les produits du catalogue (prix fixe pour tous les vendeurs).
 - Les modes de paiement (Wave, Orange Money, Liquide...) sont gérés dynamiquement depuis l'onglet "Paiements" — tu peux désactiver/supprimer un compte marchand problématique et en ajouter un autre sans toucher au code.
-- Le plafond de dette (1000 FCFA par client, tous vendeurs confondus) est appliqué automatiquement à chaque commande.
 - **Prochaine étape à intégrer** : le paiement Wave/Orange Money n'est pour l'instant qu'enregistré (lien marchand) — l'intégration API réelle (webhook de confirmation automatique) sera ajoutée une fois que tu me donnes les détails techniques de tes comptes marchands (documentation API Wave CI / Orange Money CI).

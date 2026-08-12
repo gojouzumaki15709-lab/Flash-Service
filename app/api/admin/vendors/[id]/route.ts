@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseServer";
 import { getSession } from "@/lib/auth";
 
 // On ne supprime plus jamais physiquement un vendeur : dès qu'il a de
-// l'historique (orders.vendor_id, debt_repayments.confirmed_by_vendor_id,
+// l'historique (orders.vendor_id, vendor_stock.vendor_id,
 // qui ne sont pas en ON DELETE CASCADE), un DELETE brut échoue côté
 // PostgreSQL et l'admin voit juste le vendeur "ne pas disparaître" sans
 // aucun message d'erreur clair. À la place : désactivation (is_active =

@@ -13,7 +13,7 @@ export async function GET() {
   const { data, error } = await db
     .from("orders")
     .select(
-      "id, total, status, is_debt, cash_amount_received, created_at, client_room, vendor:vendors(name), payment_method:payment_methods(label, type), items:order_items(quantity, quantity_taken, unit_price, product:products(name))"
+      "id, total, status, cash_amount_received, created_at, client_room, vendor:vendors(name), payment_method:payment_methods(label, type), items:order_items(quantity, quantity_taken, unit_price, product:products(name))"
     )
     .eq("client_id", session.id)
     .order("created_at", { ascending: false });

@@ -7,7 +7,8 @@ export async function GET() {
     .from("vendors")
     .select("id, name, is_open, room_number, building:buildings(name)")
     .eq("is_active", true)
-    .order("is_open", { ascending: false });
+    .eq("is_open", true)
+    .order("name", { ascending: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ vendors: data });

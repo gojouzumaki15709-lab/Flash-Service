@@ -104,7 +104,6 @@ create table orders (
   vendor_id uuid not null references vendors(id),
   status text not null default 'pending',  -- pending | confirmed | cancelled
   payment_method_id uuid references payment_methods(id),
-  is_debt boolean not null default false,  -- payé à crédit ?
   total integer not null default 0,        -- FCFA, entier (XOF n'a pas de décimales)
   cash_amount_received integer,            -- si paiement liquide
   confirmed_by_vendor boolean not null default false,
@@ -127,45 +126,7 @@ create table order_items (
 );
 
 -- ------------------------------------------------------------
--- 10. DETTES (crédit client, plafond global 1000, tous vendeurs confondus)
--- ------------------------------------------------------------
-create table debts (
-  id uuid primary key default gen_random_uuid(),
-  client_id uuid not null references clients(id),
-  order_id uuid references orders(id),
-  amount integer not null,
-  is_repaid boolean not null default false,
-  repaid_at timestamptz,
-  created_at timestamptz not null default now()
-);
-
--- ------------------------------------------------------------
--- 11. REMBOURSEMENTS DE DETTE (initiés par le client, confirmés par un vendeur)
--- ------------------------------------------------------------
-create table debt_repayments (
-  id uuid primary key default gen_random_uuid(),
-  client_id uuid not null references clients(id),
-  debt_ids uuid[] not null,
-  amount integer not null,
-  payment_method_id uuid references payment_methods(id),
-  status text not null default 'pending',   -- pending | confirmed | cancelled
-  confirmed_by_vendor_id uuid references vendors(id),
-  cash_amount_received integer,
-  created_at timestamptz not null default now(),
-  confirmed_at timestamptz
-);
-
--- ------------------------------------------------------------
--- VUE UTILE : dette totale actuelle d'un client (non remboursée)
--- ------------------------------------------------------------
-create view client_current_debt as
-select client_id, coalesce(sum(amount), 0) as total_debt
-from debts
-where is_repaid = false
-group by client_id;
-
--- ------------------------------------------------------------
--- 11. ÉVÉNEMENTS WEBHOOK WAVE (idempotence : Wave peut renvoyer
+-- 10. ÉVÉNEMENTS WEBHOOK WAVE (idempotence : Wave peut renvoyer
 --     le même événement plusieurs fois, on ne le traite qu'une fois)
 -- ------------------------------------------------------------
 create table wave_webhook_events (
@@ -180,7 +141,6 @@ create table wave_webhook_events (
 create index idx_vendor_stock_vendor on vendor_stock(vendor_id);
 create index idx_orders_client on orders(client_id);
 create index idx_orders_vendor on orders(vendor_id);
-create index idx_debts_client on debts(client_id);
 create index idx_orders_wave_checkout_id on orders(wave_checkout_id);
 
 -- ------------------------------------------------------------
@@ -198,8 +158,6 @@ alter table vendor_stock enable row level security;
 alter table payment_methods enable row level security;
 alter table orders enable row level security;
 alter table order_items enable row level security;
-alter table debts enable row level security;
-alter table debt_repayments enable row level security;
 alter table wave_webhook_events enable row level security;
 
 -- ------------------------------------------------------------

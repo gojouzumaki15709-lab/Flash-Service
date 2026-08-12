@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import InfoButton from "@/app/components/InfoButton";
 
 type Vendor = { id: string; name: string; is_open: boolean; building: { letter: string; number: number } };
 type StockItem = { id: string; quantity: number; product: { id: string; name: string; image_url: string | null; price: number } };
@@ -221,6 +222,7 @@ export default function ClientPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="Flash Service" style={{ width: 40, height: 40, borderRadius: 10 }} />
           <h1 className="display" style={{ fontSize: 20, color: "var(--teal)" }}>Flash Service</h1>
+          <InfoButton role="client" />
         </div>
         <button className="btn" style={{ background: "#f1ede2", boxShadow: "none", fontSize: 13 }} onClick={logout}>
           Déconnexion

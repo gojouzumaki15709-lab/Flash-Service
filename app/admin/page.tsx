@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import PasswordInput from "../components/PasswordInput";
+import InfoButton from "../components/InfoButton";
 
 type Tab = "orders" | "vendors" | "products" | "payments" | "alerts" | "clients";
 
@@ -36,6 +37,7 @@ export default function AdminPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="Flash Service" style={{ width: 40, height: 40, borderRadius: 10 }} />
           <h1 className="display" style={{ fontSize: 20, color: "var(--teal)" }}>Administration</h1>
+          <InfoButton role="admin" />
         </div>
         <button className="btn" style={{ background: "#f1ede2", boxShadow: "none", fontSize: 13 }} onClick={logout}>
           Déconnexion

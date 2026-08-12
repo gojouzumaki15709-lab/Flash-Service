@@ -13,7 +13,7 @@ export async function GET() {
   const db = supabaseAdmin();
 
   const baseSelect =
-    "id, total, status, is_debt, cash_amount_received, created_at, confirmed_at, " +
+    "id, total, status, cash_amount_received, created_at, confirmed_at, " +
     "vendor:vendors(name), client:clients(name, phone), payment_method:payment_methods(label, type), " +
     "items:order_items(quantity, quantity_taken, unit_price, product:products(name))";
 

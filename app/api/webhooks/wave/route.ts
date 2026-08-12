@@ -19,11 +19,20 @@ export async function POST(req: NextRequest) {
 
   const db = supabaseAdmin();
 
+  // Un remboursement de crédit Flash-points utilise une client_reference
+  // préfixée "credit:<id>" (voir app/api/client/credit/repay/route.ts) pour
+  // qu'on puisse le distinguer d'une commande normale ici.
+  const rawReference: string | undefined = event.data?.client_reference || undefined;
+  const isCreditRepayment = !!rawReference?.startsWith("credit:");
+  if (isCreditRepayment) {
+    return handleCreditRepaymentWebhook(db, rawReference!.slice("credit:".length), event, rawBody, signatureHeader);
+  }
+
   // On ne connaît pas encore quelle méthode de paiement / quel secret utiliser
   // tant qu'on n'a pas retrouvé la commande via client_reference. On retrouve
   // donc d'abord la commande, PUIS on vérifie la signature avec son secret,
   // avant de faire quoi que ce soit d'autre.
-  const orderId: string | undefined = event.data?.client_reference || undefined;
+  const orderId: string | undefined = rawReference || undefined;
   const waveCheckoutId: string | undefined = event.data?.id || undefined;
 
   if (!orderId && !waveCheckoutId) {
@@ -114,6 +123,70 @@ export async function POST(req: NextRequest) {
     // Le paiement a échoué : annule la commande et restitue le stock
     // réservé, de façon atomique (verrouillage des lignes de stock).
     await db.rpc("cancel_pending_order_atomic", { p_order_id: order.id });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+// Traite un événement Wave concernant le remboursement d'un crédit
+// Flash-points (client_reference = "credit:<flash_credits.id>"), séparément
+// du flux "commande" ci-dessus car il touche flash_credits, pas orders.
+async function handleCreditRepaymentWebhook(
+  db: ReturnType<typeof supabaseAdmin>,
+  creditId: string,
+  event: { id: string; type: string; data: Record<string, any> },
+  rawBody: string,
+  signatureHeader: string | null
+) {
+  const { data: credit } = await db
+    .from("flash_credits")
+    .select("id, status, amount, payment_method_id, wave_checkout_id")
+    .eq("id", creditId)
+    .maybeSingle();
+
+  if (!credit) {
+    return NextResponse.json({ ok: true, ignored: "Crédit introuvable." });
+  }
+
+  const { data: paymentMethod } = await db
+    .from("payment_methods")
+    .select("config")
+    .eq("id", credit.payment_method_id)
+    .maybeSingle();
+
+  const webhookSecret =
+    decryptSecret((paymentMethod?.config as any)?.webhook_secret as string | undefined) ?? undefined;
+
+  if (!webhookSecret || !verifyWaveWebhookSignature(rawBody, signatureHeader, webhookSecret)) {
+    return NextResponse.json({ error: "Signature invalide." }, { status: 401 });
+  }
+
+  const { error: insertEventError } = await db.from("wave_webhook_events").insert({ id: event.id, type: event.type });
+  if (insertEventError) {
+    if ((insertEventError as any).code === "23505") {
+      return NextResponse.json({ ok: true, duplicate: true });
+    }
+    return NextResponse.json({ error: "Erreur serveur." }, { status: 500 });
+  }
+
+  if (credit.status !== "pending_repayment") {
+    return NextResponse.json({ ok: true, alreadyProcessed: true });
+  }
+
+  if (event.type === "checkout.session.completed" && event.data?.payment_status === "succeeded") {
+    const waveAmount = event.data?.amount != null ? Math.round(Number(event.data.amount)) : null;
+    const waveCurrency = event.data?.currency;
+    const checkoutIdMatches =
+      !credit.wave_checkout_id || !event.data?.id || event.data.id === credit.wave_checkout_id;
+
+    if (waveAmount == null || waveAmount !== credit.amount || (waveCurrency && waveCurrency !== "XOF") || !checkoutIdMatches) {
+      return NextResponse.json({ ok: true, ignored: "Montant, devise ou session ne correspondent pas." });
+    }
+
+    await db
+      .from("flash_credits")
+      .update({ status: "repaid", repaid_at: new Date().toISOString() })
+      .eq("id", creditId);
   }
 
   return NextResponse.json({ ok: true });

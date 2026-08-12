@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import InfoButton from "@/app/components/InfoButton";
 
 type StockItem = {
   id: string;
@@ -246,6 +247,7 @@ export default function VendorPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="Flash Service" style={{ width: 40, height: 40, borderRadius: 10 }} />
           <h1 className="display" style={{ fontSize: 20, color: "var(--teal)" }}>Espace vendeur</h1>
+          <InfoButton role="vendeur" />
         </div>
         <button className="btn" style={{ background: "#f1ede2", boxShadow: "none", fontSize: 13 }} onClick={logout}>
           Déconnexion

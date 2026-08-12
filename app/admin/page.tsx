@@ -2,16 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import PasswordInput from "../components/PasswordInput";
 
-type Tab = "vendors" | "products" | "payments" | "alerts" | "clients" | "admins";
+type Tab = "orders" | "vendors" | "products" | "payments" | "alerts" | "clients";
 
 const TAB_DEFS: [Tab, string][] = [
+  ["orders", "Commandes"],
   ["vendors", "Vendeurs"],
   ["products", "Produits"],
   ["payments", "Paiements"],
   ["alerts", "Alertes stock"],
   ["clients", "Clients fréquents"],
-  ["admins", "Admins"],
 ];
 
 export default function AdminPage() {
@@ -30,20 +31,13 @@ export default function AdminPage() {
 
   return (
     <main style={{ maxWidth: 780, margin: "0 auto", padding: 20 }}>
-      <div className="app-header">
-        <div className="brand">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Flash Service" />
-          <div className="brand-text">
-            <strong>Flash Service</strong>
-            <span>Administration</span>
-          </div>
+          <img src="/logo.png" alt="Flash Service" style={{ width: 40, height: 40, borderRadius: 10 }} />
+          <h1 className="display" style={{ fontSize: 20, color: "var(--teal)" }}>Administration</h1>
         </div>
-        <button
-          className="btn"
-          style={{ background: "rgba(255,255,255,0.12)", color: "var(--paper)", boxShadow: "none", fontSize: 13 }}
-          onClick={logout}
-        >
+        <button className="btn" style={{ background: "#f1ede2", boxShadow: "none", fontSize: 13 }} onClick={logout}>
           Déconnexion
         </button>
       </div>
@@ -52,6 +46,7 @@ export default function AdminPage() {
         {TAB_DEFS.map(([id, label]) => {
           const count = counts[id];
           const isAlerts = id === "alerts" && !!count;
+          const isOrders = id === "orders" && !!count;
           return (
             <button
               key={id}
@@ -62,8 +57,8 @@ export default function AdminPage() {
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
-                background: tab === id ? "var(--flash)" : "#f1ede2",
-                color: tab === id ? "#fff" : "var(--navy)",
+                background: tab === id ? "var(--teal)" : "#f1ede2",
+                color: tab === id ? "#fff" : "var(--ink)",
                 boxShadow: "none",
               }}
               onClick={() => setTab(id)}
@@ -71,7 +66,7 @@ export default function AdminPage() {
               {label}
               {!!count && (
                 <span
-                  className={`badge ${isAlerts ? "badge-danger" : "badge-neutral"}`}
+                  className={`badge ${isAlerts ? "badge-danger" : isOrders ? "badge-warning" : "badge-neutral"}`}
                   style={{
                     padding: "1px 8px",
                     fontSize: 11,
@@ -87,86 +82,133 @@ export default function AdminPage() {
         })}
       </div>
 
+      {tab === "orders" && <OrdersTab onCount={(n) => reportCount("orders", n)} />}
       {tab === "vendors" && <VendorsTab onCount={(n) => reportCount("vendors", n)} />}
       {tab === "products" && <ProductsTab onCount={(n) => reportCount("products", n)} />}
       {tab === "payments" && <PaymentsTab onCount={(n) => reportCount("payments", n)} />}
       {tab === "alerts" && <AlertsTab onCount={(n) => reportCount("alerts", n)} />}
       {tab === "clients" && <ClientsTab onCount={(n) => reportCount("clients", n)} />}
-      {tab === "admins" && <AdminsTab onCount={(n) => reportCount("admins", n)} />}
     </main>
   );
 }
 
-function AdminsTab({ onCount }: { onCount: (n: number) => void }) {
-  const [admins, setAdmins] = useState<any[]>([]);
-  const [form, setForm] = useState({ name: "", password: "" });
-  const [error, setError] = useState("");
-  const [lastCreatedCode, setLastCreatedCode] = useState("");
+function formatDateTime(iso: string | null | undefined) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const time = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return `${date} à ${time}`;
+}
+
+function OrdersTab({ onCount }: { onCount: (n: number) => void }) {
+  const [pending, setPending] = useState<any[]>([]);
+  const [confirmed, setConfirmed] = useState<any[]>([]);
+  const [subTab, setSubTab] = useState<"pending" | "confirmed">("pending");
+  const [loading, setLoading] = useState(true);
 
   function load() {
-    fetch("/api/admin/admins").then((r) => r.json()).then((d) => {
-      const list = d.admins || [];
-      setAdmins(list);
-      onCount(list.length);
-    });
+    setLoading(true);
+    fetch("/api/admin/orders")
+      .then((r) => r.json())
+      .then((d) => {
+        const p = d.pending || [];
+        setPending(p);
+        setConfirmed(d.confirmed || []);
+        onCount(p.length);
+      })
+      .finally(() => setLoading(false));
   }
   useEffect(load, []);
 
-  async function createAdmin(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLastCreatedCode("");
-    const res = await fetch("/api/admin/admins", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json();
-    if (!res.ok) return setError(data.error);
-    setForm({ name: "", password: "" });
-    setLastCreatedCode(data.admin?.code || "");
-    load();
+  function itemsSummary(o: any) {
+    return (o.items || [])
+      .map((it: any) => `${it.quantity_taken != null ? it.quantity_taken : it.quantity} × ${it.product?.name}`)
+      .join(", ");
   }
 
   return (
-    <div style={{ display: "grid", gap: 20 }}>
-      <form onSubmit={createAdmin} className="card" style={{ display: "grid", gap: 10 }}>
-        <p style={{ fontWeight: 700 }}>Créer un compte admin</p>
-        <p style={{ fontSize: 12, opacity: 0.7, margin: "-4px 0 0" }}>
-          Le code de connexion (ex. ADMK7QX9F) est généré automatiquement, aléatoire et affiché une seule fois
-          ci-dessous : note-le tout de suite, il n'est plus jamais réaffiché ensuite. Un compte admin a accès à
-          tout (vendeurs, produits, paiements, et peut créer d'autres admins) — ne le communique qu'à une personne
-          de confiance, par un canal sûr.
-        </p>
-        {lastCreatedCode && (
-          <p style={{ fontSize: 13, background: "#eaf7ea", border: "1px solid #2e7d32", borderRadius: 6, padding: "6px 10px" }}>
-            Compte créé — code de connexion : <strong>{lastCreatedCode}</strong> (à communiquer avec son mot de passe, par un canal sûr)
-          </p>
-        )}
-        <input placeholder="Nom" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-        <input
-          type="password"
-          placeholder="Mot de passe (10 caractères min.)"
-          minLength={10}
-          value={form.password}
-          onChange={(e) => setForm({ ...form, password: e.target.value })}
-          required
-        />
-        {error && <p style={{ color: "#c0392b", fontSize: 13 }}>{error}</p>}
-        <button className="btn btn-primary" type="submit">Créer</button>
-      </form>
-
-      <div style={{ display: "grid", gap: 10 }}>
-        {admins.map((a) => (
-          <div key={a.id} className="card">
-            <strong>{a.name}</strong> ({a.code})
-            <div style={{ fontSize: 13, opacity: 0.7 }}>
-              Créé le {new Date(a.created_at).toLocaleDateString("fr-FR")}
-              {a.created_by?.name && <> — par {a.created_by.name}</>}
-            </div>
-          </div>
-        ))}
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          className="btn"
+          style={{
+            fontSize: 12,
+            padding: "8px 14px",
+            background: subTab === "pending" ? "var(--mango)" : "#f1ede2",
+            color: subTab === "pending" ? "var(--ink)" : "var(--ink)",
+            boxShadow: "none",
+          }}
+          onClick={() => setSubTab("pending")}
+        >
+          En attente {pending.length ? `(${pending.length})` : ""}
+        </button>
+        <button
+          className="btn"
+          style={{
+            fontSize: 12,
+            padding: "8px 14px",
+            background: subTab === "confirmed" ? "var(--teal)" : "#f1ede2",
+            color: subTab === "confirmed" ? "#fff" : "var(--ink)",
+            boxShadow: "none",
+          }}
+          onClick={() => setSubTab("confirmed")}
+        >
+          Confirmées
+        </button>
       </div>
+
+      {loading && <p style={{ opacity: 0.6 }}>Chargement…</p>}
+
+      {!loading && subTab === "pending" && (
+        <div style={{ display: "grid", gap: 10 }}>
+          {pending.map((o) => (
+            <div key={o.id} className="card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                <div>
+                  <strong>{o.client?.name || "Client"}</strong> ({o.client?.phone || "—"})
+                  <div style={{ fontSize: 13, opacity: 0.7 }}>chez {o.vendor?.name || "Vendeur"}</div>
+                </div>
+                <span className="badge badge-warning">En attente</span>
+              </div>
+              <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 6 }}>{itemsSummary(o)}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, opacity: 0.75 }}>
+                <span>Passée le {formatDateTime(o.created_at)}</span>
+                <strong>{o.total} FCFA</strong>
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
+                {o.is_debt ? "Dette" : o.payment_method?.label || "—"}
+              </div>
+            </div>
+          ))}
+          {!pending.length && <p style={{ opacity: 0.6 }}>Aucune commande en attente.</p>}
+        </div>
+      )}
+
+      {!loading && subTab === "confirmed" && (
+        <div style={{ display: "grid", gap: 10 }}>
+          {confirmed.map((o) => (
+            <div key={o.id} className="card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                <div>
+                  <strong>{o.client?.name || "Client"}</strong> ({o.client?.phone || "—"})
+                  <div style={{ fontSize: 13, opacity: 0.7 }}>Vendeur : {o.vendor?.name || "—"}</div>
+                </div>
+                <span className="badge badge-success">Confirmée</span>
+              </div>
+              <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 6 }}>{itemsSummary(o)}</div>
+              <div style={{ fontSize: 12, opacity: 0.7, display: "grid", gap: 2 }}>
+                <span>Créée le {formatDateTime(o.created_at)}</span>
+                <span>Validée le {formatDateTime(o.confirmed_at)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 6 }}>
+                <span style={{ opacity: 0.6 }}>{o.is_debt ? "Dette" : o.payment_method?.label || "—"}</span>
+                <strong>{o.total} FCFA</strong>
+              </div>
+            </div>
+          ))}
+          {!confirmed.length && <p style={{ opacity: 0.6 }}>Aucune commande confirmée pour le moment.</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -174,12 +216,9 @@ function AdminsTab({ onCount }: { onCount: (n: number) => void }) {
 function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
   const [vendors, setVendors] = useState<any[]>([]);
   const [buildings, setBuildings] = useState<any[]>([]);
-  const [form, setForm] = useState({ name: "", password: "", buildingId: "", roomNumber: "" });
+  const [form, setForm] = useState({ code: "", name: "", password: "", buildingId: "" });
   const [error, setError] = useState("");
-  const [lastCreatedCode, setLastCreatedCode] = useState("");
   const [expandedVendorId, setExpandedVendorId] = useState<string | null>(null);
-  const [reassign, setReassign] = useState<Record<string, { buildingId: string; roomNumber: string }>>({});
-  const [reassignMessage, setReassignMessage] = useState<Record<string, string>>({});
 
   function load() {
     fetch("/api/admin/vendors").then((r) => r.json()).then((d) => {
@@ -194,61 +233,19 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
   async function createVendor(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    setLastCreatedCode("");
     const res = await fetch("/api/admin/vendors", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, roomNumber: Number(form.roomNumber) }),
+      body: JSON.stringify(form),
     });
     const data = await res.json();
     if (!res.ok) return setError(data.error);
-    setForm({ name: "", password: "", buildingId: "", roomNumber: "" });
-    setLastCreatedCode(data.vendor?.code || "");
+    setForm({ code: "", name: "", password: "", buildingId: "" });
     load();
   }
 
-  async function removeVendor(id: string, name: string) {
-    if (!confirm(`Désactiver le vendeur "${name}" ? Il ne pourra plus se connecter ni gérer son stock, mais son historique (commandes, remboursements) est conservé.`)) return;
-    const res = await fetch(`/api/admin/vendors/${id}`, { method: "DELETE" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return setError(data.error || "Erreur lors de la désactivation.");
-    load();
-  }
-
-  async function setVendorActive(id: string, isActive: boolean) {
-    const res = await fetch(`/api/admin/vendors/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return setError(data.error || "Erreur.");
-    load();
-  }
-
-  function reassignFieldsFor(v: any) {
-    return reassign[v.id] || { buildingId: "", roomNumber: v.room_number ? String(v.room_number) : "" };
-  }
-
-  async function saveReassign(v: any) {
-    setReassignMessage((m) => ({ ...m, [v.id]: "" }));
-    const fields = reassignFieldsFor(v);
-    const body: Record<string, unknown> = {};
-    if (fields.buildingId) body.buildingId = fields.buildingId;
-    if (fields.roomNumber) body.roomNumber = Number(fields.roomNumber);
-    if (!body.buildingId && !body.roomNumber) return;
-
-    const res = await fetch(`/api/admin/vendors/${v.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setReassignMessage((m) => ({ ...m, [v.id]: data.error || "Erreur." }));
-      return;
-    }
-    setReassignMessage((m) => ({ ...m, [v.id]: "Mis à jour." }));
+  async function removeVendor(id: string) {
+    await fetch(`/api/admin/vendors/${id}`, { method: "DELETE" });
     load();
   }
 
@@ -256,34 +253,21 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
     <div style={{ display: "grid", gap: 20 }}>
       <form onSubmit={createVendor} className="card" style={{ display: "grid", gap: 10 }}>
         <p style={{ fontWeight: 700 }}>Créer un compte vendeur</p>
-        <p style={{ fontSize: 12, opacity: 0.7, margin: "-4px 0 0" }}>
-          Le code de connexion (ex. VENK7QX9F) est généré automatiquement, pas besoin de le saisir.
-        </p>
-        {lastCreatedCode && (
-          <p style={{ fontSize: 13, background: "#eaf7ea", border: "1px solid #2e7d32", borderRadius: 6, padding: "6px 10px" }}>
-            Compte créé — code de connexion : <strong>{lastCreatedCode}</strong> (à communiquer au vendeur avec son mot de passe)
-          </p>
-        )}
+        <input placeholder="Code de connexion" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} required />
         <input placeholder="Nom" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-        <input type="password" placeholder="Mot de passe" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
-        <div style={{ display: "flex", gap: 8 }}>
-          <select value={form.buildingId} onChange={(e) => setForm({ ...form, buildingId: e.target.value })} required style={{ flex: 1 }}>
-            <option value="">— Bâtiment —</option>
-            {buildings.map((b) => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min={1}
-            max={96}
-            placeholder="Chambre (1-96)"
-            value={form.roomNumber}
-            onChange={(e) => setForm({ ...form, roomNumber: e.target.value })}
-            required
-            style={{ width: 130 }}
-          />
-        </div>
+        <PasswordInput
+          value={form.password}
+          onChange={(v) => setForm({ ...form, password: v })}
+          placeholder="Mot de passe"
+          autoComplete="new-password"
+          required
+        />
+        <select value={form.buildingId} onChange={(e) => setForm({ ...form, buildingId: e.target.value })} required>
+          <option value="">— Bâtiment —</option>
+          {buildings.map((b) => (
+            <option key={b.id} value={b.id}>{b.letter}{b.number}</option>
+          ))}
+        </select>
         {error && <p style={{ color: "#c0392b", fontSize: 13 }}>{error}</p>}
         <button className="btn btn-primary" type="submit">Créer</button>
       </form>
@@ -293,17 +277,9 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
           <div key={v.id} className="card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <strong>{v.name}</strong> ({v.code}) {v.is_active === false && (
-                  <span style={{ fontSize: 11, color: "#c0392b", border: "1px solid #c0392b", borderRadius: 4, padding: "1px 6px", marginLeft: 6 }}>
-                    Désactivé
-                  </span>
-                )}
+                <strong>{v.name}</strong> ({v.code})
                 <div style={{ fontSize: 13, opacity: 0.7 }}>
-                  {v.building?.name && v.room_number ? (
-                    <>Chambre {v.building.name}-{v.room_number} — {v.is_open ? "Ouvert" : "Fermé"}</>
-                  ) : (
-                    <span style={{ color: "#c0392b", fontWeight: 600 }}>Bâtiment/chambre non assignés — {v.is_open ? "Ouvert" : "Fermé"}</span>
-                  )}
+                  Bâtiment {v.building?.letter}{v.building?.number} — {v.is_open ? "Ouvert" : "Fermé"}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
@@ -314,44 +290,11 @@ function VendorsTab({ onCount }: { onCount: (n: number) => void }) {
                 >
                   {expandedVendorId === v.id ? "Fermer" : "Gérer le stock"}
                 </button>
-                {v.is_active === false ? (
-                  <button className="btn" style={{ background: "#e0f0e4", color: "#1e7a34", boxShadow: "none", fontSize: 12 }} onClick={() => setVendorActive(v.id, true)}>
-                    Réactiver
-                  </button>
-                ) : (
-                  <button className="btn" style={{ background: "#fbe4e0", color: "#c0392b", boxShadow: "none", fontSize: 12 }} onClick={() => removeVendor(v.id, v.name)}>
-                    Supprimer
-                  </button>
-                )}
+                <button className="btn" style={{ background: "#fbe4e0", color: "#c0392b", boxShadow: "none", fontSize: 12 }} onClick={() => removeVendor(v.id)}>
+                  Supprimer
+                </button>
               </div>
             </div>
-
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
-              <select
-                value={reassignFieldsFor(v).buildingId}
-                onChange={(e) => setReassign((r) => ({ ...r, [v.id]: { ...reassignFieldsFor(v), buildingId: e.target.value } }))}
-                style={{ fontSize: 13 }}
-              >
-                <option value="">— Changer de bâtiment —</option>
-                {buildings.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-              <input
-                type="number"
-                min={1}
-                max={96}
-                placeholder="Chambre (1-96)"
-                value={reassignFieldsFor(v).roomNumber}
-                onChange={(e) => setReassign((r) => ({ ...r, [v.id]: { ...reassignFieldsFor(v), roomNumber: e.target.value } }))}
-                style={{ width: 130, fontSize: 13 }}
-              />
-              <button className="btn" style={{ fontSize: 12, boxShadow: "none", background: "#f1ede2" }} onClick={() => saveReassign(v)}>
-                Enregistrer
-              </button>
-              {reassignMessage[v.id] && <span style={{ fontSize: 12, opacity: 0.7 }}>{reassignMessage[v.id]}</span>}
-            </div>
-
             {expandedVendorId === v.id && <VendorStockManager vendorId={v.id} />}
           </div>
         ))}
@@ -473,7 +416,7 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
       <form onSubmit={createProduct} className="card" style={{ display: "grid", gap: 10 }}>
         <p style={{ fontWeight: 700 }}>Ajouter un produit au catalogue</p>
         <input placeholder="Nom (ex: Coca-Cola)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-        <input type="number" step="1" min="0" placeholder="Prix (FCFA, entier)" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required />
+        <input type="number" placeholder="Prix (FCFA)" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required />
         <input placeholder="URL image (optionnel)" value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} />
         {form.imageUrl && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -544,8 +487,6 @@ function ProductsTab({ onCount }: { onCount: (n: number) => void }) {
 function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
   const [methods, setMethods] = useState<any[]>([]);
   const [form, setForm] = useState({ type: "cash", label: "", merchantLink: "", iconUrl: "", apiKey: "", webhookSecret: "" });
-  const [rotateFormId, setRotateFormId] = useState<string | null>(null);
-  const [rotateValues, setRotateValues] = useState({ apiKey: "", webhookSecret: "" });
 
   function load() {
     fetch("/api/admin/payment-methods").then((r) => r.json()).then((d) => {
@@ -578,27 +519,6 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
 
   async function removeMethod(id: string) {
     await fetch(`/api/admin/payment-methods/${id}`, { method: "DELETE" });
-    load();
-  }
-
-  // Rotation : remplace la clé API et/ou le secret webhook d'un moyen de
-  // paiement existant. Nécessaire après une fuite (ou simplement après le
-  // passage au chiffrement V3, pour les valeurs créées avant) : le
-  // chiffrement protège une clé au repos, il ne répare pas une clé déjà
-  // vue en clair par quelqu'un. Seule une vraie régénération côté Wave,
-  // suivie de sa saisie ici, referme la fenêtre d'exposition.
-  async function rotateSecrets(id: string) {
-    const body: Record<string, string> = {};
-    if (rotateValues.apiKey) body.apiKey = rotateValues.apiKey;
-    if (rotateValues.webhookSecret) body.webhookSecret = rotateValues.webhookSecret;
-    if (!Object.keys(body).length) return;
-    await fetch(`/api/admin/payment-methods/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    setRotateValues({ apiKey: "", webhookSecret: "" });
-    setRotateFormId(null);
     load();
   }
 
@@ -651,8 +571,7 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
 
       <div style={{ display: "grid", gap: 10 }}>
         {methods.map((m) => (
-          <div key={m.id} className="card" style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div key={m.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {m.icon_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -670,31 +589,9 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
               <div>
                 <strong>{m.label}</strong> ({m.type})
                 <div style={{ fontSize: 12, opacity: 0.6 }}>{m.is_active ? "Actif" : "Désactivé"}</div>
-                {m.type === "wave" && (
-                  <div style={{ fontSize: 11, marginTop: 2 }}>
-                    {m.secret_rotated_at ? (
-                      <span style={{ opacity: 0.6 }}>
-                        Clés tournées le {new Date(m.secret_rotated_at).toLocaleDateString("fr-FR")}
-                      </span>
-                    ) : (
-                      <span style={{ color: "#c0392b", fontWeight: 600 }}>
-                        ⚠ Jamais tournées depuis le passage au chiffrement
-                      </span>
-                    )}
-                  </div>
-                )}
               </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              {m.type === "wave" && (
-                <button
-                  className="btn"
-                  style={{ fontSize: 12, background: "#f1ede2", boxShadow: "none" }}
-                  onClick={() => setRotateFormId(rotateFormId === m.id ? null : m.id)}
-                >
-                  {rotateFormId === m.id ? "Fermer" : "Tourner les clés"}
-                </button>
-              )}
               <button className="btn" style={{ fontSize: 12, background: "#f1ede2", boxShadow: "none" }} onClick={() => toggleActive(m.id, m.is_active)}>
                 {m.is_active ? "Désactiver" : "Activer"}
               </button>
@@ -702,28 +599,6 @@ function PaymentsTab({ onCount }: { onCount: (n: number) => void }) {
                 Supprimer
               </button>
             </div>
-          </div>
-          {rotateFormId === m.id && (
-            <div style={{ display: "grid", gap: 8, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
-              <p style={{ fontSize: 12, opacity: 0.7 }}>
-                Régénère d'abord la clé côté Wave (Business Portal → Développeurs), puis colle la nouvelle
-                valeur ici. Laisse un champ vide pour ne pas le changer.
-              </p>
-              <input
-                placeholder="Nouvelle clé API Wave (wave_sn_prod_...)"
-                value={rotateValues.apiKey}
-                onChange={(e) => setRotateValues({ ...rotateValues, apiKey: e.target.value })}
-              />
-              <input
-                placeholder="Nouveau secret webhook (wave_sn_WHS_...)"
-                value={rotateValues.webhookSecret}
-                onChange={(e) => setRotateValues({ ...rotateValues, webhookSecret: e.target.value })}
-              />
-              <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => rotateSecrets(m.id)}>
-                Enregistrer la rotation
-              </button>
-            </div>
-          )}
           </div>
         ))}
       </div>

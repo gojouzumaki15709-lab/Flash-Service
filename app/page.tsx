@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import PasswordInput from "./components/PasswordInput";
 
 export default function Home() {
   const router = useRouter();
@@ -71,39 +72,23 @@ export default function Home() {
         alignItems: "center",
         justifyContent: "center",
         padding: "24px",
+        background:
+          "radial-gradient(circle at 15% 10%, rgba(255,138,61,0.16), transparent 40%), radial-gradient(circle at 85% 90%, rgba(15,110,95,0.14), transparent 45%), var(--paper)",
       }}
     >
-      <div style={{ textAlign: "center", marginBottom: 22 }}>
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 96,
-            height: 96,
-            borderRadius: 26,
-            background: "var(--navy)",
-            backgroundImage: "linear-gradient(135deg, var(--navy), var(--navy-deep))",
-            marginBottom: 14,
-            boxShadow: "0 10px 0 var(--navy-deep)",
-          }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Flash Service" style={{ width: 62, height: 62, objectFit: "contain" }} />
-        </div>
-        <h1 style={{ fontSize: 26, letterSpacing: "-0.01em" }}>
-          Flash <span style={{ color: "var(--flash-deep)" }}>Service</span>
-        </h1>
-        <p style={{ color: "var(--navy)", opacity: 0.65, marginTop: 6, fontSize: 14 }}>
-          Trouve un vendeur ouvert près de ta chambre
+      <div style={{ textAlign: "center", marginBottom: 28 }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo.png"
+          alt="Flash Service"
+          style={{ width: 108, height: 108, borderRadius: 24, marginBottom: 8 }}
+        />
+        <p style={{ color: "var(--ink)", opacity: 0.7, marginTop: 6 }}>
+          Trouve un vendeur ouvert dans ton bâtiment
         </p>
       </div>
 
-      <div className="card-ticket" style={{ width: "100%", maxWidth: 400 }}>
-        <div className="flash-rule" style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-          {mode === "login" ? "Connexion" : "Inscription"}
-        </div>
-
+      <div className="card" style={{ width: "100%", maxWidth: 400 }}>
         {mode === "login" ? (
           <form onSubmit={submitLogin} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div>
@@ -119,12 +104,7 @@ export default function Home() {
 
             <div>
               <label className="label">Mot de passe</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+              <PasswordInput value={password} onChange={setPassword} autoComplete="current-password" required />
             </div>
 
             {error && <p style={{ color: "#c0392b", fontSize: 13, fontWeight: 600 }}>{error}</p>}
@@ -133,20 +113,18 @@ export default function Home() {
               {loading ? "..." : "Se connecter"}
             </button>
 
-            <hr className="ticket-divider" />
-
-            <p style={{ textAlign: "center", fontSize: 13 }}>
-              Pas encore connecté ?{" "}
+            <p style={{ textAlign: "center", marginTop: 4, fontSize: 13 }}>
+              Pas encore de compte ?{" "}
               <button
                 className="btn"
-                style={{ background: "none", boxShadow: "none", padding: 0, color: "var(--flash-deep)", fontWeight: 700 }}
+                style={{ background: "none", boxShadow: "none", padding: 0, color: "var(--mango-dark)", fontWeight: 700 }}
                 onClick={() => {
                   setMode("register");
                   setError("");
                 }}
                 type="button"
               >
-                Rejoins l'aventure avec Flash Service
+                Appuie ici et rejoins l'aventure avec Flash Service
               </button>
             </p>
           </form>
@@ -169,7 +147,7 @@ export default function Home() {
 
             <div>
               <label className="label">Mot de passe</label>
-              <input type="password" value={regPassword} onChange={(e) => setRegPassword(e.target.value)} required />
+              <PasswordInput value={regPassword} onChange={setRegPassword} autoComplete="new-password" required />
             </div>
 
             {error && <p style={{ color: "#c0392b", fontSize: 13, fontWeight: 600 }}>{error}</p>}
@@ -178,13 +156,11 @@ export default function Home() {
               {loading ? "..." : "Créer mon compte"}
             </button>
 
-            <hr className="ticket-divider" />
-
-            <p style={{ textAlign: "center", fontSize: 13 }}>
+            <p style={{ textAlign: "center", marginTop: 4, fontSize: 13 }}>
               Déjà un compte ?{" "}
               <button
                 className="btn"
-                style={{ background: "none", boxShadow: "none", padding: 0, color: "var(--flash-deep)", fontWeight: 700 }}
+                style={{ background: "none", boxShadow: "none", padding: 0, color: "var(--mango-dark)", fontWeight: 700 }}
                 onClick={() => {
                   setMode("login");
                   setError("");
@@ -197,10 +173,6 @@ export default function Home() {
           </form>
         )}
       </div>
-
-      <p style={{ marginTop: 18, fontSize: 12, opacity: 0.45, fontFamily: "var(--font-mono)" }}>
-        service de vente · sucreries fraîches
-      </p>
     </main>
   );
 }

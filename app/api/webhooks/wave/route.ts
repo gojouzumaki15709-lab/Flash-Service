@@ -22,9 +22,7 @@ export async function POST(req: NextRequest) {
   // On ne connaît pas encore quelle méthode de paiement / quel secret utiliser
   // tant qu'on n'a pas retrouvé la commande via client_reference. On retrouve
   // donc d'abord la commande, PUIS on vérifie la signature avec son secret,
-  // avant de faire quoi que ce soit d'autre. Cette lecture est en dehors de
-  // la transaction : elle ne fait qu'identifier la commande, aucun effet de
-  // bord n'a lieu ici (tout l'effet métier est dans process_wave_webhook_atomic).
+  // avant de faire quoi que ce soit d'autre.
   const orderId: string | undefined = event.data?.client_reference || undefined;
   const waveCheckoutId: string | undefined = event.data?.id || undefined;
 
@@ -32,7 +30,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Référence de commande manquante." }, { status: 400 });
   }
 
-  let orderQuery = db.from("orders").select("id, payment_method_id");
+  let orderQuery = db
+    .from("orders")
+    .select("id, status, vendor_id, payment_method_id, wave_checkout_id");
   const { data: order } = orderId
     ? await orderQuery.eq("id", orderId).maybeSingle()
     : await orderQuery.eq("wave_checkout_id", waveCheckoutId).maybeSingle();
@@ -49,55 +49,72 @@ export async function POST(req: NextRequest) {
     .eq("id", order.payment_method_id)
     .maybeSingle();
 
-  const webhookSecret =
-    decryptSecret((paymentMethod?.config as any)?.webhook_secret as string | undefined) ?? undefined;
+  const webhookSecret = decryptSecret(
+    (paymentMethod?.config as any)?.webhook_secret as string | undefined
+  ) ?? undefined;
 
   if (!webhookSecret || !verifyWaveWebhookSignature(rawBody, signatureHeader, webhookSecret)) {
     return NextResponse.json({ error: "Signature invalide." }, { status: 401 });
   }
 
-  // À partir d'ici, plus aucune opération séparée : tout (idempotence de
-  // l'événement + verrou de la commande + vérifications + effet métier)
-  // se passe dans une seule transaction PostgreSQL (voir
-  // supabase/migration_hardening_v4.sql). Si quoi que ce soit échoue en
-  // cours de route, RIEN n'est appliqué et Wave peut retenter l'appel —
-  // contrairement à l'ancien code où l'événement pouvait être marqué
-  // "traité" sans que la commande ait réellement été confirmée/annulée.
-
-  const paymentSucceeded =
-    event.type === "checkout.session.completed" && event.data?.payment_status === "succeeded";
-  const paymentFailed = event.type === "checkout.session.payment_failed";
-
-  // Montant : le XOF n'a pas de décimales. Un montant non entier n'est
-  // PAS arrondi (contrairement à l'ancien code) — il est traité comme
-  // absent, ce qui fait échouer la vérification de correspondance côté
-  // fonction SQL plutôt que de risquer d'accepter un montant approximatif.
-  const rawAmount = event.data?.amount != null ? Number(event.data.amount) : null;
-  const waveAmount = rawAmount != null && Number.isInteger(rawAmount) ? rawAmount : null;
-
-  // Devise : passée telle quelle (pas de valeur par défaut). La fonction
-  // SQL exige une correspondance stricte avec "XOF", donc une devise
-  // absente ou différente fait systématiquement échouer la vérification.
-  const waveCurrency: string | null = event.data?.currency ?? null;
-
-  const { data: result, error: rpcError } = await db.rpc("process_wave_webhook_atomic", {
-    p_event_id: event.id,
-    p_event_type: event.type,
-    p_order_id: order.id,
-    p_payment_succeeded: paymentSucceeded,
-    p_payment_failed: paymentFailed,
-    p_wave_amount: waveAmount,
-    p_wave_currency: waveCurrency,
-    p_wave_checkout_id: event.data?.id ?? null,
-    p_wave_transaction_id: event.data?.transaction_id ?? null,
-  });
-
-  if (rpcError) {
-    // Erreur serveur (DB indisponible, etc.) : on laisse Wave réessayer
-    // plus tard plutôt que de répondre 200 sur une transaction qui n'a
-    // jamais été appliquée.
+  // Idempotence : Wave peut renvoyer le même événement plusieurs fois.
+  const { error: insertEventError } = await db
+    .from("wave_webhook_events")
+    .insert({ id: event.id, type: event.type });
+  if (insertEventError) {
+    // code 23505 = violation de contrainte unique -> événement déjà traité
+    if ((insertEventError as any).code === "23505") {
+      return NextResponse.json({ ok: true, duplicate: true });
+    }
+    // Autre erreur : on laisse Wave réessayer plus tard.
     return NextResponse.json({ error: "Erreur serveur." }, { status: 500 });
   }
 
-  return NextResponse.json(result ?? { ok: true });
+  if (order.status !== "pending") {
+    // Déjà traité (confirmé ou annulé) par un événement précédent.
+    return NextResponse.json({ ok: true, alreadyProcessed: true });
+  }
+
+  if (event.type === "checkout.session.completed" && event.data?.payment_status === "succeeded") {
+    // Vérifie que ce que Wave dit avoir encaissé correspond bien à la
+    // commande retrouvée : montant exact et devise XOF. Sans ce contrôle,
+    // un événement valide (signature correcte) mais portant sur un
+    // montant/checkout différent aurait quand même pu confirmer la
+    // commande.
+    const { data: orderRow } = await db.from("orders").select("total").eq("id", order.id).single();
+    const expectedAmount = orderRow ? Math.round(Number(orderRow.total)) : null;
+    const waveAmount = event.data?.amount != null ? Math.round(Number(event.data.amount)) : null;
+    const waveCurrency = event.data?.currency;
+    const checkoutIdMatches =
+      !order.wave_checkout_id || !event.data?.id || event.data.id === order.wave_checkout_id;
+
+    if (
+      expectedAmount == null ||
+      waveAmount == null ||
+      waveAmount !== expectedAmount ||
+      (waveCurrency && waveCurrency !== "XOF") ||
+      !checkoutIdMatches
+    ) {
+      // On enregistre quand même l'événement (déjà fait ci-dessus, pour
+      // l'idempotence) mais on refuse de confirmer une commande dont le
+      // montant/devise/checkout ne correspond pas.
+      return NextResponse.json({ ok: true, ignored: "Montant, devise ou session ne correspondent pas." });
+    }
+
+    await db
+      .from("orders")
+      .update({
+        status: "confirmed",
+        confirmed_at: new Date().toISOString(),
+        wave_transaction_id: event.data?.transaction_id || null,
+        wave_checkout_id: event.data?.id || order.wave_checkout_id,
+      })
+      .eq("id", order.id);
+  } else if (event.type === "checkout.session.payment_failed") {
+    // Le paiement a échoué : annule la commande et restitue le stock
+    // réservé, de façon atomique (verrouillage des lignes de stock).
+    await db.rpc("cancel_pending_order_atomic", { p_order_id: order.id });
+  }
+
+  return NextResponse.json({ ok: true });
 }
